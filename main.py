@@ -1,36 +1,12 @@
-import asyncio
-from pyrogram import Client
-from config import Config
-from handlers import commands, files, batch
-from pyrogram.errors import PeerIdInvalid
+#main.py
 
-app = Client(
-    "file-store-bot",
-    api_id=Config.API_ID,
-    api_hash=Config.API_HASH,
-    bot_token=Config.BOT_TOKEN
-)
+from pyrogram import Client from config import Config from handlers import commands, files, batch
 
-# Register handlers
-commands.register(app)
-files.register(app)
-batch.register(app)
+app = Client( "file-store-bot", api_id=Config.API_ID, api_hash=Config.API_HASH, bot_token=Config.BOT_TOKEN )
 
-async def main():
-    await app.start()
+Register Handlers
 
-    try:
-        chat = await app.get_chat("https://t.me/+RDh4zn9AgcEzNjI1")
-        print(f"✅ Channel resolved: {chat.title} ({chat.id})")
-    except PeerIdInvalid:
-        print("❌ Cannot resolve the private channel. Make sure the bot is added with full rights.")
-    except Exception as e:
-        print(f"❌ Failed to access the private channel: {e}")
+commands.register(app) files.register(app) batch.register(app)
 
-    print("Lakki Started ✅")
+print("Bot Started") app.run()
 
-    # Keeps the bot running (instead of app.idle())
-    await asyncio.Event().wait()
-
-if __name__ == "__main__":
-    asyncio.run(main())
