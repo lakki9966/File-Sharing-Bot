@@ -1,6 +1,7 @@
 from pyrogram import Client
 from config import Config
 from handlers import commands, files, batch
+from pyrogram.errors import PeerIdInvalid
 
 app = Client(
     "file-store-bot",
@@ -14,5 +15,15 @@ commands.register(app)
 files.register(app)
 batch.register(app)
 
-print("Lakki Started")
-app.run()
+async def startup():
+    try:
+        chat = await app.get_chat("https://t.me/+RDh4zn9AgcEzNjI1")
+        print(f"✅ Channel resolved: {chat.title} ({chat.id})")
+    except PeerIdInvalid:
+        print("❌ Cannot resolve the private channel. Make sure the bot is added.")
+    except Exception as e:
+        print(f"❌ Failed to access the private channel: {e}")
+
+    print("Lakki Started")
+
+app.run(startup())
