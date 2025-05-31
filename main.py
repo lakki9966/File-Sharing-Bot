@@ -15,9 +15,10 @@ commands.register(app)
 files.register(app)
 batch.register(app)
 
-async def startup():
+@app.on_startup()
+async def startup(client):
     try:
-        chat = await app.get_chat("https://t.me/+RDh4zn9AgcEzNjI1")
+        chat = await client.get_chat("https://t.me/+RDh4zn9AgcEzNjI1")
         print(f"✅ Channel resolved: {chat.title} ({chat.id})")
     except PeerIdInvalid:
         print("❌ Cannot resolve the private channel. Make sure the bot is added.")
@@ -26,4 +27,4 @@ async def startup():
 
     print("Lakki Started")
 
-app.run(startup())
+app.run()
