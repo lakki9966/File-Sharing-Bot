@@ -27,10 +27,10 @@ async def main():
     except Exception as e:
         print(f"❌ Failed to access the private channel: {e}")
 
-    print("Lakki Started")
-    await app.idle()  # Keeps the bot running
+    print("Lakki Started ✅")
 
-    await app.stop()
+    # Keeps the bot running (instead of app.idle())
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())
