@@ -3,7 +3,7 @@ from config import Config
 from datetime import datetime
 
 client = MongoClient(Config.DB_URI)
-db = client["FileSharePro"]
+db = client["FileShareBot"]
 
 class File:
     collection = db["files"]
@@ -14,8 +14,8 @@ class File:
         return cls.collection.insert_one(data)
     
     @classmethod
-    def get_batch_files(cls, batch_id):
-        return list(cls.collection.find({"batch_id": batch_id}))
+    def get_user_files(cls, user_id):
+        return list(cls.collection.find({"uploader_id": user_id}))
 
 class User:
     collection = db["users"]
@@ -27,3 +27,18 @@ class User:
             {"$set": {"username": username, "last_seen": datetime.now()}},
             upsert=True
         )
+
+class Admin:
+    collection = db["admins"]
+    
+    @classmethod
+    def add_admin(cls, user_id):
+        return cls.collection.update_one(
+            {"user_id": user_id},
+            {"$set": {"added_at": datetime.now()}},
+            upsert=True
+        )
+    
+    @classmethod
+    def is_admin(cls, user_id):
+        return cls.collection.find_one({"user_id": user_id}) is not None
