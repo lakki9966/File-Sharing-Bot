@@ -1,14 +1,22 @@
 import os
+import logging
 from dotenv import load_dotenv
 load_dotenv()
 from pyrogram import Client, filters, idle
 from config import Config
 from database.models import File, User, Admin
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 import random
 import string
 import sys
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 class FileBot(Client):
     def __init__(self):
@@ -22,7 +30,6 @@ class FileBot(Client):
         self.batch_data = {}
     
     def generate_random_id(self):
-        """Generate 8-character alphanumeric string"""
         chars = string.ascii_letters + string.digits
         return ''.join(random.choice(chars) for _ in range(8))
 
@@ -30,9 +37,22 @@ app = FileBot()
 
 # ===== ADMIN FILTER =====
 def admin_filter(_, __, message):
+    if not message.from_user:
+        return False
     return Admin.is_admin(message.from_user.id)
 
 admin_only = filters.create(admin_filter)
+
+# ===== VERIFICATION COMMAND =====
+@app.on_message(filters.command("verify"))
+async def verify(client, message):
+    user_id = message.from_user.id
+    is_admin = Admin.is_admin(user_id)
+    await message.reply(
+        f"🆔 Your ID: `{user_id}`\n"
+        f"👑 Admin: `{is_admin}`\n"
+        f"🤖 Bot: @{(await client.get_me()).username}"
+    )
 
 # ===== CORE COMMANDS =====
 @app.on_message(filters.command("start"))
@@ -40,7 +60,6 @@ async def start(client, message):
     if len(message.command) > 1:
         param = message.command[1]
         
-        # Handle batch download
         if param.startswith("batch-"):
             file_ids = param.split("-")[1:]
             for fid in file_ids:
@@ -51,10 +70,9 @@ async def start(client, message):
                         message_id=int(fid)
                     )
                 except Exception as e:
-                    print(f"Failed to send file {fid}: {e}")
+                    logger.error(f"Failed to send file {fid}: {e}")
             return
             
-        # Handle single file download
         file_data = File.collection.find_one({"$or": [
             {"random_id": param},
             {"file_id": param}
@@ -69,74 +87,69 @@ async def start(client, message):
                 )
                 return
             except Exception as e:
-                print(f"File send error: {e}")
+                logger.error(f"File send error: {e}")
 
-    # Default start message
     User.add_user(message.from_user.id, message.from_user.username)
-    await message.reply("🌟 Welcome to File Share Bot!\nUse /help for all commands")
+    await message.reply(
+        "🌟 Welcome to File Share Bot!\n"
+        "Use /help for commands\n"
+        f"Your ID: `{message.from_user.id}`"
+    )
 
-@app.on_message(filters.command("help"))
-async def help(client, message):
-    await message.reply("""
-📚 Available Commands:
+# [Keep all your existing commands like /help, /link, /batch, /endbatch exactly the same...]
 
-📁 File Sharing:
-/link - Share single file (reply to file)
-/batch - Start batch upload
-/endbatch - Finish batch
-
-👤 Account:
-/myfiles - View your files
-
-👑 Admin:
-/stats - Bot statistics
-/addadmin - Grant admin rights
-/setexpiry - Change expiry time
-""")
-
-# ===== FILE SHARING =====
-@app.on_message(filters.command("link"))
-async def link(client, message):
-    if not message.reply_to_message:
-        return await message.reply("❌ Reply to a file with /link")
-    
+# ===== ADMIN COMMANDS =====
+@app.on_message(filters.command("stats") & admin_only)
+async def stats(client, message):
     try:
-        forwarded = await message.reply_to_message.forward(Config.DB_CHANNEL_ID)
-        random_id = app.generate_random_id()
-        File.add_file({
-            "file_id": str(forwarded.id),
-            "random_id": random_id,
-            "type": "single",
-            "uploader_id": message.from_user.id,
-            "timestamp": datetime.now()
-        })
-        await message.reply(f"🔗 Download: t.me/{(await client.get_me()).username}?start={random_id}")
+        stats_text = f"""
+📊 Bot Statistics:
+├ Files: {File.collection.count_documents({})}
+├ Users: {User.collection.count_documents({})}
+└ Admins: {Admin.collection.count_documents({})}
+
+⚙️ Configuration:
+├ DB Channel: {Config.DB_CHANNEL_ID}
+└ Owner ID: {Config.OWNER_ID}
+"""
+        await message.reply(stats_text)
     except Exception as e:
         await message.reply(f"⚠️ Error: {str(e)}")
+        logger.exception("Stats command failed")
 
-# [Keep all your other existing commands exactly the same...]
-# ===== BATCH UPLOAD =====
-# [Keep your existing batch commands exactly as they are]
-# ===== ADMIN COMMANDS =====
-# [Keep your existing admin commands exactly as they are]
+@app.on_message(filters.command("addadmin") & admin_only)
+async def add_admin(client, message):
+    try:
+        if len(message.command) < 2:
+            return await message.reply("❌ Usage: /addadmin [user_id]")
+        
+        new_admin = int(message.command[1])
+        Admin.add_admin(new_admin)
+        await message.reply(f"✅ Added admin: {new_admin}")
+        try:
+            await client.send_message(
+                chat_id=new_admin,
+                text=f"🎉 You're now admin!\nAdded by: {message.from_user.id}"
+            )
+        except:
+            pass
+    except Exception as e:
+        await message.reply(f"⚠️ Error: {str(e)}")
+        logger.exception("Addadmin failed")
 
 # ===== RUN BOT =====
 async def run():
-    try:
-        await app.start()
-        print("✅ Bot started successfully!")
-        await idle()
-    except Exception as e:
-        print(f"❌ Bot failed to start: {str(e)}")
-    finally:
-        await app.stop()
+    await app.start()
+    logger.info("✅ Bot started successfully")
+    await idle()
+    await app.stop()
 
 if __name__ == "__main__":
     try:
         loop = asyncio.get_event_loop()
         loop.run_until_complete(run())
     except KeyboardInterrupt:
-        print("Bot stopped by user")
+        logger.info("Bot stopped by user")
     except Exception as e:
-        print(f"Bot crashed: {str(e)}")
+        logger.critical(f"Bot crashed: {str(e)}")
         sys.exit(1)
