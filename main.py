@@ -220,8 +220,7 @@ async def start_batch(client, message):
 @app.on_message(
     (filters.document | filters.photo | filters.video | 
      filters.sticker | filters.animation | filters.text) &
-    ~filters.command("endbatch") &
-    ~filters.edited
+    ~filters.command("endbatch")
 )
 async def collect_batch_files(client, message):
     if message.from_user.id not in app.batch_data:
