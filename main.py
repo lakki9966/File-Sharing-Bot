@@ -7,6 +7,7 @@ import random
 import string
 import logging
 import sys
+from pyrogram.errors import FloodWait
 
 # Setup logging
 logging.basicConfig(
@@ -40,7 +41,7 @@ class FileBot(Client):
             return "video"
         elif message.sticker:
             return "sticker"
-        elif message.animation:  # GIFs are considered animations in Telegram
+        elif message.animation:
             return "gif"
         elif message.text:
             return "text"
@@ -104,8 +105,8 @@ async def help(client, message):
 
 📁 File Sharing:
 /link - Generate file link (reply to any media)
-/batch - Start batch upload
-/endbatch - Finish batch
+/batch - Start batch upload (reply to first file)
+/endbatch - Finish batch upload
 
 👤 Account:
 /myfiles - View your uploaded files
@@ -199,18 +200,33 @@ async def link(client, message):
 
 # ===== BATCH UPLOAD =====
 @app.on_message(filters.command("batch"))
-async def batch(client, message):
+async def start_batch(client, message):
     if not message.reply_to_message:
-        return await message.reply("❌ Reply to first file with /batch")
+        return await message.reply("❌ Please reply to the first file with /batch")
+    
+    if message.from_user.id in app.batch_data:
+        return await message.reply("❌ You already have an active batch. End it with /endbatch first.")
     
     batch_id = app.generate_random_id()
     app.batch_data[message.from_user.id] = {
         "first_id": message.reply_to_message.id,
         "chat_id": message.chat.id,
         "batch_id": batch_id,
-        "file_count": 0
+        "start_time": datetime.now()
     }
-    await message.reply(f"📦 Batch started! ID: {batch_id}\nSend other files now, then /endbatch")
+    await message.reply(
+        f"📦 Batch upload started! ID: {batch_id}\n"
+        f"Now send more files and type /endbatch when done"
+    )
+
+@app.on_message(filters.media | filters.text | filters.sticker | filters.animation)
+async def collect_batch_files(client, message):
+    if message.from_user.id not in app.batch_data:
+        return
+    
+    # Update the last message in the batch
+    app.batch_data[message.from_user.id]["last_id"] = message.id
+    await message.reply("✅ File added to batch. Send more or /endbatch when done")
 
 @app.on_message(filters.command("endbatch"))
 async def end_batch(client, message):
@@ -220,24 +236,27 @@ async def end_batch(client, message):
     
     try:
         file_count = 0
-        # Get all messages between start and end
-        messages = []
-        async for msg in client.get_chat_history(
-            chat_id=user_data["chat_id"],
-            limit=100  # Adjust this based on your expected batch size
-        ):
-            if msg.id < user_data["first_id"]:
-                break
-            if msg.id <= message.id:
-                messages.append(msg)
+        current_id = user_data["first_id"]
+        last_id = user_data.get("last_id", message.id)
         
-        # Process messages in chronological order
-        for msg in reversed(messages):
+        # Include the endbatch message if it contains media
+        if (message.document or message.photo or message.video or 
+            message.sticker or message.animation or message.text):
+            last_id = message.id
+        
+        while current_id <= last_id:
             try:
-                # Check for supported media types
-                if (msg.document or msg.photo or msg.video or 
-                    msg.sticker or msg.animation or msg.text):
+                msg = await client.get_messages(
+                    chat_id=user_data["chat_id"],
+                    message_ids=current_id
+                )
+                
+                if msg and (msg.document or msg.photo or msg.video or 
+                          msg.sticker or msg.animation or msg.text):
+                    # Forward to DB channel
                     forwarded = await msg.forward(Config.DB_CHANNEL_ID)
+                    
+                    # Save to database
                     File.add_file({
                         "file_id": str(forwarded.id),
                         "random_id": app.generate_random_id(),
@@ -248,20 +267,31 @@ async def end_batch(client, message):
                         "media_type": app.get_media_type(msg)
                     })
                     file_count += 1
+                
+                current_id += 1
+                
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                continue
             except Exception as e:
-                logger.error(f"Error processing message {msg.id}: {e}")
+                logger.error(f"Error processing message {current_id}: {e}")
+                current_id += 1
+                continue
 
         if file_count == 0:
-            return await message.reply("❌ No valid files found!")
+            return await message.reply("❌ No valid files found in batch!")
         
         bot_username = (await client.get_me()).username
         await message.reply(
-            f"📦 Batch complete! {file_count} files\n"
-            f"🔗 t.me/{bot_username}?start=batch-{user_data['batch_id']}"
+            f"📦 Batch completed successfully!\n"
+            f"• Files processed: {file_count}\n"
+            f"• Batch ID: {user_data['batch_id']}\n"
+            f"🔗 Download link: t.me/{bot_username}?start=batch-{user_data['batch_id']}"
         )
+        
     except Exception as e:
-        await message.reply(f"⚠️ Batch error: {str(e)}")
-        logger.error(f"Batch error: {e}")
+        await message.reply("⚠️ Failed to complete batch. Please try again.")
+        logger.error(f"Batch processing failed: {e}")
     finally:
         if message.from_user.id in app.batch_data:
             del app.batch_data[message.from_user.id]
