@@ -2,10 +2,8 @@ from pyrogram import Client, idle
 import asyncio
 import logging
 from config import Config
-from .utilities.filters import admin_only
-from .commands import (admin, batch, files, user)
+from .commands import admin, batch, files, user
 
-# Initialize bot
 class FileBot(Client):
     def __init__(self):
         super().__init__(
@@ -19,20 +17,12 @@ class FileBot(Client):
 
 app = FileBot()
 
-# Register handlers
 def register_handlers():
-    # Admin commands
     app.add_handler(admin.admin_handler)
-    
-    # Batch commands
     app.add_handler(batch.batch_handler)
     app.add_handler(batch.collect_handler)
     app.add_handler(batch.endbatch_handler)
-    
-    # File commands
     app.add_handler(files.link_handler)
-    
-    # User commands
     app.add_handler(user.start_handler)
     app.add_handler(user.help_handler)
 
