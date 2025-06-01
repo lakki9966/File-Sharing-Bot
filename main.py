@@ -17,6 +17,12 @@ class FileBot(Client):
 
 app = FileBot()
 
+# ===== ADMIN FILTER =====
+def admin_filter(_, __, message):
+    return Admin.is_admin(message.from_user.id)
+
+admin_only = filters.create(admin_filter)
+
 # ===== CORE COMMANDS =====
 @app.on_message(filters.command("start"))
 async def start(client, message):
@@ -100,12 +106,12 @@ async def end_batch(client, message):
     del app.batch_data[message.from_user.id]
 
 # ===== ADMIN COMMANDS =====
-@app.on_message(filters.command("stats") & filters.user(Config.ADMIN_IDS))
+@app.on_message(filters.command("stats") & admin_only)
 async def stats(client, message):
     total_files = File.collection.count_documents({})
     await message.reply(f"📊 Stats:\nTotal Files: {total_files}")
 
-@app.on_message(filters.command("addadmin") & filters.user(Config.ADMIN_IDS))
+@app.on_message(filters.command("addadmin") & admin_only)
 async def add_admin(client, message):
     try:
         new_admin = int(message.text.split()[1])
@@ -114,7 +120,7 @@ async def add_admin(client, message):
     except:
         await message.reply("❌ Use: /addadmin [user_id]")
 
-@app.on_message(filters.command("setexpiry") & filters.user(Config.ADMIN_IDS))
+@app.on_message(filters.command("setexpiry") & admin_only)
 async def set_expiry(client, message):
     try:
         mins = int(message.text.split()[1])
@@ -123,10 +129,17 @@ async def set_expiry(client, message):
     except:
         await message.reply("❌ Use: /setexpiry [minutes]")
 
+# ===== INITIAL ADMIN SETUP =====
+async def setup_first_admin():
+    if not Admin.collection.find_one():
+        # Add your user ID as first admin
+        Admin.add_admin(YOUR_USER_ID)  # Replace with your Telegram ID
+
 # ===== RUN BOT =====
 async def run():
     await app.start()
-    print("✅ All commands working!")
+    await setup_first_admin()  # Ensure at least one admin exists
+    print("✅ Bot started with admin system!")
     await idle()
 
 if __name__ == "__main__":
