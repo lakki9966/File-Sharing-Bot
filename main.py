@@ -172,10 +172,8 @@ async def link(client, message):
         return await message.reply("❌ Reply to a file with /link")
     
     try:
-        # Forward the message to DB channel
         forwarded = await message.reply_to_message.forward(Config.DB_CHANNEL_ID)
         
-        # Check if the message contains supported media
         if (not message.reply_to_message.document and 
             not message.reply_to_message.photo and 
             not message.reply_to_message.video and
@@ -212,25 +210,26 @@ async def start_batch(client, message):
         "first_id": message.reply_to_message.id,
         "chat_id": message.chat.id,
         "batch_id": batch_id,
-        "start_time": datetime.now(),
-        "files": []  # To store file IDs
+        "files": []
     }
     await message.reply(
         f"📦 Batch upload started! ID: {batch_id}\n"
         f"Now send more files and type /endbatch when done"
     )
 
-# This handler should come AFTER the endbatch handler
-@app.on_message(filters.media | filters.text | filters.sticker | filters.animation)
+@app.on_message(
+    (filters.document | filters.photo | filters.video | 
+     filters.sticker | filters.animation | filters.text) &
+    ~filters.command("endbatch") &
+    ~filters.edited
+)
 async def collect_batch_files(client, message):
     if message.from_user.id not in app.batch_data:
         return
     
-    # Add file to batch collection
     app.batch_data[message.from_user.id]["files"].append(message.id)
     await message.reply("✅ File added to batch. Send more or /endbatch when done")
 
-# This handler needs to have higher priority
 @app.on_message(filters.command("endbatch"))
 async def end_batch(client, message):
     user_data = app.batch_data.get(message.from_user.id)
@@ -239,10 +238,28 @@ async def end_batch(client, message):
     
     try:
         file_count = 0
-        # Include the first message (that was replied to with /batch)
-        message_ids = [user_data["first_id"]] + user_data.get("files", [])
+        # Process the first message (that was replied to with /batch)
+        first_msg = await client.get_messages(
+            chat_id=user_data["chat_id"],
+            message_ids=user_data["first_id"]
+        )
         
-        for msg_id in message_ids:
+        if first_msg and (first_msg.document or first_msg.photo or first_msg.video or 
+                        first_msg.sticker or first_msg.animation or first_msg.text):
+            forwarded = await first_msg.forward(Config.DB_CHANNEL_ID)
+            File.add_file({
+                "file_id": str(forwarded.id),
+                "random_id": app.generate_random_id(),
+                "type": "batch",
+                "uploader_id": message.from_user.id,
+                "batch_id": user_data["batch_id"],
+                "timestamp": datetime.now(),
+                "media_type": app.get_media_type(first_msg)
+            })
+            file_count += 1
+        
+        # Process all collected files
+        for msg_id in user_data["files"]:
             try:
                 msg = await client.get_messages(
                     chat_id=user_data["chat_id"],
@@ -250,11 +267,8 @@ async def end_batch(client, message):
                 )
                 
                 if msg and (msg.document or msg.photo or msg.video or 
-                          msg.sticker or msg.animation or msg.text):
-                    # Forward to DB channel
+                           msg.sticker or msg.animation or msg.text):
                     forwarded = await msg.forward(Config.DB_CHANNEL_ID)
-                    
-                    # Save to database
                     File.add_file({
                         "file_id": str(forwarded.id),
                         "random_id": app.generate_random_id(),
@@ -265,10 +279,6 @@ async def end_batch(client, message):
                         "media_type": app.get_media_type(msg)
                     })
                     file_count += 1
-                
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                continue
             except Exception as e:
                 logger.error(f"Error processing message {msg_id}: {e}")
                 continue
@@ -283,7 +293,6 @@ async def end_batch(client, message):
             f"• Batch ID: {user_data['batch_id']}\n"
             f"🔗 Download link: t.me/{bot_username}?start=batch-{user_data['batch_id']}"
         )
-        
     except Exception as e:
         await message.reply("⚠️ Failed to complete batch. Please try again.")
         logger.error(f"Batch processing failed: {e}")
