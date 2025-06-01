@@ -2,7 +2,7 @@ from pyrogram import filters
 from utilities.filters import admin_only
 from config import Config
 from database.models import Admin, User, File
-from bot import app
+from main import app  
 import logging
 
 logger = logging.getLogger(__name__)
