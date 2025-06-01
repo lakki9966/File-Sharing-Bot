@@ -10,5 +10,5 @@ class Config:
     DB_URI = os.environ.get("DB_URI")  # MongoDB URL
     DB_CHANNEL_ID = int(os.environ.get("DB_CHANNEL_ID", -1001234567890))  # Your private channel ID
     
-    # Optional
-    ADMIN_IDS = [int(id) for id in os.environ.get("ADMIN_IDS", "").split()]
+    # Admin System
+    OWNER_ID = int(os.environ.get("OWNER_ID", 123456789))  # Your Telegram ID here
