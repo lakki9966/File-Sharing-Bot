@@ -1,5 +1,5 @@
 from pyrogram import filters
-from bot import app
+from main import app
 from config import Config
 from database.models import File
 from datetime import datetime
