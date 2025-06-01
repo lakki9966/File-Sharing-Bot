@@ -5,6 +5,14 @@ import asyncio
 from datetime import datetime, timedelta
 import random
 import string
+import logging
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 class FileBot(Client):
     def __init__(self):
@@ -26,6 +34,8 @@ app = FileBot()
 
 # ===== ADMIN FILTER =====
 def admin_filter(_, __, message):
+    if not message.from_user:
+        return False
     return Admin.is_admin(message.from_user.id)
 
 admin_only = filters.create(admin_filter)
@@ -47,7 +57,7 @@ async def start(client, message):
                         message_id=int(fid)
                     )
                 except Exception as e:
-                    print(f"Failed to send file {fid}: {e}")
+                    logger.error(f"Failed to send file {fid}: {e}")
             return
             
         # Handle single file download
@@ -65,7 +75,7 @@ async def start(client, message):
                 )
                 return
             except Exception as e:
-                print(f"File send error: {e}")
+                logger.error(f"File send error: {e}")
 
     # Default start message
     User.add_user(message.from_user.id, message.from_user.username)
@@ -109,6 +119,7 @@ async def link(client, message):
         await message.reply(f"🔗 Download: t.me/{(await client.get_me()).username}?start={random_id}")
     except Exception as e:
         await message.reply(f"⚠️ Error: {str(e)}")
+        logger.error(f"Link error: {e}")
 
 # ===== BATCH UPLOAD =====
 @app.on_message(filters.command("batch"))
@@ -119,7 +130,8 @@ async def batch(client, message):
     app.batch_data[message.from_user.id] = {
         "first_id": message.reply_to_message.id,
         "chat_id": message.chat.id,
-        "last_message": None
+        "last_id": None,
+        "file_count": 0
     }
     await message.reply("📦 Batch started! Send other files now, then /endbatch")
 
@@ -130,74 +142,80 @@ async def end_batch(client, message):
         return await message.reply("❌ No active batch session!")
     
     try:
-        # Get all messages between first and /endbatch
-        messages = []
-        async for msg in client.get_messages(
-            chat_id=user_data["chat_id"],
-            message_ids=range(user_data["first_id"], message.id + 1)
-        ):
-            if msg.document or msg.photo or msg.video:
-                messages.append(msg)
-        
-        if not messages:
+        file_ids = []
+        for msg_id in range(user_data["first_id"], message.id + 1):
+            try:
+                msg = await client.get_messages(
+                    chat_id=user_data["chat_id"],
+                    message_ids=msg_id
+                )
+                if msg.document or msg.photo or msg.video:
+                    forwarded = await msg.forward(Config.DB_CHANNEL_ID)
+                    file_ids.append(str(forwarded.id))
+                    
+                    File.add_file({
+                        "file_id": str(forwarded.id),
+                        "type": "batch",
+                        "uploader_id": message.from_user.id,
+                        "batch_id": f"batch-{message.from_user.id}-{datetime.now().timestamp()}",
+                        "timestamp": datetime.now()
+                    })
+            except Exception as e:
+                logger.error(f"Error processing message {msg_id}: {e}")
+
+        if not file_ids:
             return await message.reply("❌ No valid files found!")
         
-        # Forward all files to channel
-        file_ids = []
-        for msg in messages:
-            try:
-                forwarded = await msg.forward(Config.DB_CHANNEL_ID)
-                file_ids.append(str(forwarded.id))
-                
-                File.add_file({
-                    "file_id": str(forwarded.id),
-                    "type": "batch",
-                    "uploader_id": message.from_user.id,
-                    "batch_id": f"batch-{message.from_user.id}-{datetime.now().timestamp()}",
-                    "timestamp": datetime.now()
-                })
-            except Exception as e:
-                print(f"Failed to save file: {e}")
-        
-        # Generate batch link
-        if file_ids:
-            bot_username = (await client.get_me()).username
-            await message.reply(
-                f"📦 Batch complete!\n"
-                f"🔗 t.me/{bot_username}?start=batch-{'-'.join(file_ids)}"
-            )
-        else:
-            await message.reply("❌ Failed to save any files")
-            
+        bot_username = (await client.get_me()).username
+        await message.reply(
+            f"📦 Batch complete! {len(file_ids)} files\n"
+            f"🔗 t.me/{bot_username}?start=batch-{'-'.join(file_ids)}"
+        )
     except Exception as e:
         await message.reply(f"⚠️ Batch error: {str(e)}")
+        logger.error(f"Batch error: {e}")
     finally:
-        # Cleanup
         if message.from_user.id in app.batch_data:
             del app.batch_data[message.from_user.id]
 
 # ===== ADMIN COMMANDS =====
 @app.on_message(filters.command("stats") & admin_only)
 async def stats(client, message):
-    stats_text = f"""
+    try:
+        stats_text = f"""
 📊 Bot Statistics:
-Total Files: {File.collection.count_documents({})}
-Total Users: {User.collection.count_documents({})}
-Total Admins: {Admin.collection.count_documents({})}
+├ Files: {File.collection.count_documents({})}
+├ Users: {User.collection.count_documents({})}
+└ Admins: {Admin.collection.count_documents({})}
+
+⚙️ Configuration:
+├ DB Channel: {Config.DB_CHANNEL_ID}
+└ Owner ID: {Config.OWNER_ID}
 """
-    await message.reply(stats_text)
+        await message.reply(stats_text)
+    except Exception as e:
+        await message.reply(f"⚠️ Error: {str(e)}")
+        logger.exception("Stats command failed")
 
 @app.on_message(filters.command("addadmin") & admin_only)
 async def add_admin(client, message):
     try:
-        new_admin = int(message.text.split()[1])
-        if Admin.is_admin(new_admin):
-            await message.reply("ℹ️ This user is already an admin")
-        else:
-            Admin.add_admin(new_admin)
-            await message.reply(f"✅ Added admin: {new_admin}")
-    except (IndexError, ValueError):
-        await message.reply("❌ Usage: /addadmin [user_id]")
+        if len(message.command) < 2:
+            return await message.reply("❌ Usage: /addadmin [user_id]")
+        
+        new_admin = int(message.command[1])
+        Admin.add_admin(new_admin)
+        await message.reply(f"✅ Added admin: {new_admin}")
+        try:
+            await client.send_message(
+                chat_id=new_admin,
+                text=f"🎉 You're now admin!\nAdded by: {message.from_user.id}"
+            )
+        except:
+            pass
+    except Exception as e:
+        await message.reply(f"⚠️ Error: {str(e)}")
+        logger.exception("Addadmin failed")
 
 @app.on_message(filters.command("setexpiry") & admin_only)
 async def set_expiry(client, message):
@@ -210,20 +228,22 @@ async def set_expiry(client, message):
             await message.reply("❌ Please enter between 1-1440 minutes")
     except (IndexError, ValueError):
         await message.reply("❌ Usage: /setexpiry [minutes]")
+    except Exception as e:
+        logger.exception("Setexpiry failed")
 
 # ===== RUN BOT =====
 async def run():
     await app.start()
-    print("✅ Bot started successfully!")
+    logger.info("✅ Bot started successfully!")
     await idle()
+    await app.stop()
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
     try:
+        loop = asyncio.get_event_loop()
         loop.run_until_complete(run())
     except KeyboardInterrupt:
-        print("Bot stopped by user")
+        logger.info("Bot stopped by user")
     except Exception as e:
-        print(f"Bot crashed: {str(e)}")
-    finally:
-        loop.close()
+        logger.critical(f"Bot crashed: {str(e)}")
+        sys.exit(1)
