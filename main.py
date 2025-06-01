@@ -3,7 +3,10 @@ import asyncio
 import logging
 import sys
 from config import Config
-from commands import admin, batch, files, user  # Changed from relative to absolute import
+from commands.admin import admin_handler
+from commands.batch import batch_handler, collect_handler, endbatch_handler
+from commands.files import link_handler
+from commands.user import start_handler, help_handler
 
 class FileBot(Client):
     def __init__(self):
