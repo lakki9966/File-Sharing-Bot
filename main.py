@@ -86,7 +86,7 @@ async def help(client, message):
 📚 Available Commands:
 
 📁 File Sharing:
-/link - Generate file link (reply to file)
+/link - Generate file link (reply to any media)
 /batch - Start batch upload
 /endbatch - Finish batch
 
@@ -154,19 +154,47 @@ async def link(client, message):
         return await message.reply("❌ Reply to a file with /link")
     
     try:
+        # Forward the message to DB channel
         forwarded = await message.reply_to_message.forward(Config.DB_CHANNEL_ID)
+        
+        # Check if the message contains supported media
+        if (not message.reply_to_message.document and 
+            not message.reply_to_message.photo and 
+            not message.reply_to_message.video and
+            not message.reply_to_message.sticker and
+            not message.reply_to_message.animation and
+            not message.reply_to_message.text):
+            return await message.reply("❌ Unsupported media type")
+        
         random_id = app.generate_random_id()
         File.add_file({
             "file_id": str(forwarded.id),
             "random_id": random_id,
             "type": "single",
             "uploader_id": message.from_user.id,
-            "timestamp": datetime.now()
+            "timestamp": datetime.now(),
+            "media_type": self.get_media_type(message.reply_to_message)
         })
         await message.reply(f"🔗 Download: t.me/{(await client.get_me()).username}?start={random_id}")
     except Exception as e:
         await message.reply(f"⚠️ Error: {str(e)}")
         logger.error(f"Link error: {e}")
+
+def get_media_type(self, message):
+    """Determine the media type of the message"""
+    if message.document:
+        return "document"
+    elif message.photo:
+        return "photo"
+    elif message.video:
+        return "video"
+    elif message.sticker:
+        return "sticker"
+    elif message.animation:  # GIFs are considered animations in Telegram
+        return "gif"
+    elif message.text:
+        return "text"
+    return "unknown"
 
 # ===== BATCH UPLOAD =====
 @app.on_message(filters.command("batch"))
@@ -197,7 +225,9 @@ async def end_batch(client, message):
                     chat_id=user_data["chat_id"],
                     message_ids=msg_id
                 )
-                if msg.document or msg.photo or msg.video:
+                # Check for supported media types
+                if (msg.document or msg.photo or msg.video or 
+                    msg.sticker or msg.animation or msg.text):
                     forwarded = await msg.forward(Config.DB_CHANNEL_ID)
                     File.add_file({
                         "file_id": str(forwarded.id),
@@ -205,7 +235,8 @@ async def end_batch(client, message):
                         "type": "batch",
                         "uploader_id": message.from_user.id,
                         "batch_id": user_data["batch_id"],
-                        "timestamp": datetime.now()
+                        "timestamp": datetime.now(),
+                        "media_type": self.get_media_type(msg)
                     })
                     file_count += 1
             except Exception as e:
