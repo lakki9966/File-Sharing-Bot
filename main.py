@@ -212,22 +212,25 @@ async def start_batch(client, message):
         "first_id": message.reply_to_message.id,
         "chat_id": message.chat.id,
         "batch_id": batch_id,
-        "start_time": datetime.now()
+        "start_time": datetime.now(),
+        "files": []  # To store file IDs
     }
     await message.reply(
         f"📦 Batch upload started! ID: {batch_id}\n"
         f"Now send more files and type /endbatch when done"
     )
 
+# This handler should come AFTER the endbatch handler
 @app.on_message(filters.media | filters.text | filters.sticker | filters.animation)
 async def collect_batch_files(client, message):
     if message.from_user.id not in app.batch_data:
         return
     
-    # Update the last message in the batch
-    app.batch_data[message.from_user.id]["last_id"] = message.id
+    # Add file to batch collection
+    app.batch_data[message.from_user.id]["files"].append(message.id)
     await message.reply("✅ File added to batch. Send more or /endbatch when done")
 
+# This handler needs to have higher priority
 @app.on_message(filters.command("endbatch"))
 async def end_batch(client, message):
     user_data = app.batch_data.get(message.from_user.id)
@@ -236,19 +239,14 @@ async def end_batch(client, message):
     
     try:
         file_count = 0
-        current_id = user_data["first_id"]
-        last_id = user_data.get("last_id", message.id)
+        # Include the first message (that was replied to with /batch)
+        message_ids = [user_data["first_id"]] + user_data.get("files", [])
         
-        # Include the endbatch message if it contains media
-        if (message.document or message.photo or message.video or 
-            message.sticker or message.animation or message.text):
-            last_id = message.id
-        
-        while current_id <= last_id:
+        for msg_id in message_ids:
             try:
                 msg = await client.get_messages(
                     chat_id=user_data["chat_id"],
-                    message_ids=current_id
+                    message_ids=msg_id
                 )
                 
                 if msg and (msg.document or msg.photo or msg.video or 
@@ -268,14 +266,11 @@ async def end_batch(client, message):
                     })
                     file_count += 1
                 
-                current_id += 1
-                
             except FloodWait as e:
                 await asyncio.sleep(e.value)
                 continue
             except Exception as e:
-                logger.error(f"Error processing message {current_id}: {e}")
-                current_id += 1
+                logger.error(f"Error processing message {msg_id}: {e}")
                 continue
 
         if file_count == 0:
