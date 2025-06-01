@@ -220,14 +220,19 @@ async def end_batch(client, message):
     
     try:
         file_count = 0
+        # Get all messages between start and end
+        messages = []
         async for msg in client.get_chat_history(
             chat_id=user_data["chat_id"],
-            offset_id=user_data["first_id"]-1,
-            reverse=True
+            limit=100  # Adjust this based on your expected batch size
         ):
-            if msg.id > message.id:
+            if msg.id < user_data["first_id"]:
                 break
-                
+            if msg.id <= message.id:
+                messages.append(msg)
+        
+        # Process messages in chronological order
+        for msg in reversed(messages):
             try:
                 # Check for supported media types
                 if (msg.document or msg.photo or msg.video or 
