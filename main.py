@@ -1,3 +1,6 @@
+import os
+from dotenv import load_dotenv
+load_dotenv()
 from pyrogram import Client, filters, idle
 from config import Config
 from database.models import File, User, Admin
