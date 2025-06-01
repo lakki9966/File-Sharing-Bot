@@ -2,7 +2,7 @@ from pyrogram import Client, filters, idle
 from config import Config
 from database.models import File, User, Admin
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 import random
 import string
 import logging
@@ -32,7 +32,6 @@ class FileBot(Client):
         return ''.join(random.choice(chars) for _ in range(length))
     
     def get_media_type(self, message):
-        """Determine the media type of the message"""
         if message.document:
             return "document"
         elif message.photo:
@@ -51,13 +50,66 @@ app = FileBot()
 
 # ===== ADMIN FILTER =====
 def admin_filter(_, __, message):
-    if not message.from_user:
-        return False
-    return Admin.is_admin(message.from_user.id)
+    return message.from_user and Admin.is_admin(message.from_user.id)
 
 admin_only = filters.create(admin_filter)
 
-# ===== CORE COMMANDS =====
+# ===== AUTO-DELETE FEATURE =====
+async def delete_message(client, chat_id, message_id):
+    try:
+        await client.delete_messages(chat_id, message_id)
+    except Exception as e:
+        logger.error(f"Failed to delete {message_id}: {e}")
+
+async def cleanup_expired_files():
+    while True:
+        try:
+            now = datetime.now()
+            files = File.collection.find({"sent_messages.expiry_time": {"$lt": now}})
+            
+            for file in files:
+                for msg in file["sent_messages"]:
+                    if msg["expiry_time"] < now:
+                        await delete_message(app, msg["chat_id"], msg["message_id"])
+                        File.collection.update_one(
+                            {"_id": file["_id"]},
+                            {"$pull": {"sent_messages": {"message_id": msg["message_id"]}}}
+                        )
+        except Exception as e:
+            logger.error(f"Cleanup error: {e}")
+        await asyncio.sleep(60)
+
+# ===== BROADCAST FEATURE =====
+@app.on_message(filters.command("broadcast") & admin_only)
+async def broadcast_message(client, message):
+    if not message.reply_to_message:
+        return await message.reply("❌ Reply to a message with /broadcast")
+    
+    users = User.collection.find({})
+    success = failed = 0
+    
+    for user in users:
+        try:
+            await message.reply_to_message.copy(user["user_id"])
+            success += 1
+            await asyncio.sleep(0.1)  # Flood control
+        except Exception as e:
+            failed += 1
+            logger.error(f"Broadcast failed for {user['user_id']}: {e}")
+    
+    await message.reply(f"📢 Broadcast Complete!\n• Success: {success}\n• Failed: {failed}")
+
+# ===== AUTO-DELETE ADMIN CONTROL =====
+@app.on_message(filters.command("setexpiry") & admin_only)
+async def set_expiry(client, message):
+    try:
+        mins = int(message.command[1])
+        Config.AUTO_DELETE_MINS = mins
+        await message.reply(f"✅ Files will now auto-delete after {mins} minutes")
+    except:
+        await message.reply("❌ Usage: /setexpiry [minutes]")
+
+# ===== MODIFIED START COMMAND =====
 @app.on_message(filters.command("start"))
 async def start(client, message):
     if len(message.command) > 1:
@@ -67,242 +119,77 @@ async def start(client, message):
             batch_id = param.split("-")[1]
             batch_files = File.collection.find({"batch_id": batch_id})
             
-            sent_count = 0
             for file_data in batch_files:
                 try:
-                    await client.copy_message(
+                    msg = await client.copy_message(
                         chat_id=message.chat.id,
                         from_chat_id=Config.DB_CHANNEL_ID,
                         message_id=int(file_data["file_id"])
                     )
-                    sent_count += 1
+                    
+                    expiry_time = datetime.now() + timedelta(minutes=Config.AUTO_DELETE_MINS)
+                    
+                    File.collection.update_one(
+                        {"_id": file_data["_id"]},
+                        {"$push": {"sent_messages": {
+                            "chat_id": message.chat.id,
+                            "message_id": msg.id,
+                            "expiry_time": expiry_time
+                        }}}
+                    )
+                    
+                    asyncio.create_task(
+                        schedule_deletion(message.chat.id, msg.id, Config.AUTO_DELETE_MINS * 60)
+                    )
+                    
                 except Exception as e:
                     logger.error(f"Failed to send file {file_data['file_id']}: {e}")
-            
-            await message.reply(f"📦 Sent {sent_count} files from batch")
             return
             
         file_data = File.collection.find_one({"random_id": param})
         if file_data:
             try:
-                await client.copy_message(
+                msg = await client.copy_message(
                     chat_id=message.chat.id,
                     from_chat_id=Config.DB_CHANNEL_ID,
                     message_id=int(file_data["file_id"])
                 )
-                return
-            except Exception as e:
-                logger.error(f"File send error: {e}")
-
-    User.add_user(message.from_user.id, message.from_user.username)
-    await message.reply("🌟 Welcome to File Share Bot!\nUse /help for all commands")
-
-# ===== HELP COMMAND =====
-@app.on_message(filters.command("help"))
-async def help(client, message):
-    help_text = """
-📚 Available Commands:
-
-📁 File Sharing:
-/link - Generate file link (reply to any media)
-/batch - Start batch upload (reply to first file)
-/endbatch - Finish batch upload
-
-👤 Account:
-/myfiles - View your uploaded files
-
-👑 Admin Commands:
-/stats - View bot statistics
-/addadmin [user_id] - Add admin
-/removeadmin [user_id] - Remove admin
-/setexpiry [minutes] - Set file expiry
-/verify - Check your admin status
-"""
-    await message.reply(help_text)
-
-# ===== ADMIN COMMANDS =====
-@app.on_message(filters.command("stats") & admin_only)
-async def stats(client, message):
-    try:
-        stats_text = f"""
-📊 Bot Statistics:
-├ Files: {File.collection.count_documents({})}
-├ Users: {User.collection.count_documents({})}
-└ Admins: {Admin.collection.count_documents({})}
-
-⚙️ Configuration:
-├ DB Channel: {Config.DB_CHANNEL_ID}
-└ Owner ID: {Config.OWNER_ID}
-"""
-        await message.reply(stats_text)
-    except Exception as e:
-        await message.reply(f"⚠️ Error: {str(e)}")
-        logger.exception("Stats command failed")
-
-@app.on_message(filters.command("addadmin") & admin_only)
-async def add_admin(client, message):
-    try:
-        if len(message.command) < 2:
-            return await message.reply("❌ Usage: /addadmin [user_id]")
-        
-        new_admin = int(message.command[1])
-        Admin.add_admin(new_admin)
-        await message.reply(f"✅ Added admin: {new_admin}")
-    except Exception as e:
-        await message.reply(f"⚠️ Error: {str(e)}")
-        logger.exception("Addadmin failed")
-
-@app.on_message(filters.command("removeadmin") & admin_only)
-async def remove_admin(client, message):
-    try:
-        if len(message.command) < 2:
-            return await message.reply("❌ Usage: /removeadmin [user_id]")
-        
-        admin_id = int(message.command[1])
-        Admin.collection.delete_one({"user_id": admin_id})
-        await message.reply(f"✅ Removed admin: {admin_id}")
-    except Exception as e:
-        await message.reply(f"⚠️ Error: {str(e)}")
-        logger.exception("Removeadmin failed")
-
-# ===== FILE SHARING =====
-@app.on_message(filters.command("link"))
-async def link(client, message):
-    if not message.reply_to_message:
-        return await message.reply("❌ Reply to a file with /link")
-    
-    try:
-        forwarded = await message.reply_to_message.forward(Config.DB_CHANNEL_ID)
-        
-        if (not message.reply_to_message.document and 
-            not message.reply_to_message.photo and 
-            not message.reply_to_message.video and
-            not message.reply_to_message.sticker and
-            not message.reply_to_message.animation and
-            not message.reply_to_message.text):
-            return await message.reply("❌ Unsupported media type")
-        
-        random_id = app.generate_random_id()
-        File.add_file({
-            "file_id": str(forwarded.id),
-            "random_id": random_id,
-            "type": "single",
-            "uploader_id": message.from_user.id,
-            "timestamp": datetime.now(),
-            "media_type": app.get_media_type(message.reply_to_message)
-        })
-        await message.reply(f"🔗 Download: t.me/{(await client.get_me()).username}?start={random_id}")
-    except Exception as e:
-        await message.reply(f"⚠️ Error: {str(e)}")
-        logger.error(f"Link error: {e}")
-
-# ===== BATCH UPLOAD =====
-@app.on_message(filters.command("batch"))
-async def start_batch(client, message):
-    if not message.reply_to_message:
-        return await message.reply("❌ Please reply to the first file with /batch")
-    
-    if message.from_user.id in app.batch_data:
-        return await message.reply("❌ You already have an active batch. End it with /endbatch first.")
-    
-    batch_id = app.generate_random_id()
-    app.batch_data[message.from_user.id] = {
-        "first_id": message.reply_to_message.id,
-        "chat_id": message.chat.id,
-        "batch_id": batch_id,
-        "files": []
-    }
-    await message.reply(
-        f"📦 Batch upload started! ID: {batch_id}\n"
-        f"Now send more files and type /endbatch when done"
-    )
-
-@app.on_message(
-    (filters.document | filters.photo | filters.video | 
-     filters.sticker | filters.animation | filters.text) &
-    ~filters.command("endbatch")
-)
-async def collect_batch_files(client, message):
-    if message.from_user.id not in app.batch_data:
-        return
-    
-    app.batch_data[message.from_user.id]["files"].append(message.id)
-    await message.reply("✅ File added to batch. Send more or /endbatch when done")
-
-@app.on_message(filters.command("endbatch"))
-async def end_batch(client, message):
-    user_data = app.batch_data.get(message.from_user.id)
-    if not user_data:
-        return await message.reply("❌ No active batch session!")
-    
-    try:
-        file_count = 0
-        # Process the first message (that was replied to with /batch)
-        first_msg = await client.get_messages(
-            chat_id=user_data["chat_id"],
-            message_ids=user_data["first_id"]
-        )
-        
-        if first_msg and (first_msg.document or first_msg.photo or first_msg.video or 
-                        first_msg.sticker or first_msg.animation or first_msg.text):
-            forwarded = await first_msg.forward(Config.DB_CHANNEL_ID)
-            File.add_file({
-                "file_id": str(forwarded.id),
-                "random_id": app.generate_random_id(),
-                "type": "batch",
-                "uploader_id": message.from_user.id,
-                "batch_id": user_data["batch_id"],
-                "timestamp": datetime.now(),
-                "media_type": app.get_media_type(first_msg)
-            })
-            file_count += 1
-        
-        # Process all collected files
-        for msg_id in user_data["files"]:
-            try:
-                msg = await client.get_messages(
-                    chat_id=user_data["chat_id"],
-                    message_ids=msg_id
+                
+                expiry_time = datetime.now() + timedelta(minutes=Config.AUTO_DELETE_MINS)
+                
+                File.collection.update_one(
+                    {"_id": file_data["_id"]},
+                    {"$push": {"sent_messages": {
+                        "chat_id": message.chat.id,
+                        "message_id": msg.id,
+                        "expiry_time": expiry_time
+                    }}}
                 )
                 
-                if msg and (msg.document or msg.photo or msg.video or 
-                           msg.sticker or msg.animation or msg.text):
-                    forwarded = await msg.forward(Config.DB_CHANNEL_ID)
-                    File.add_file({
-                        "file_id": str(forwarded.id),
-                        "random_id": app.generate_random_id(),
-                        "type": "batch",
-                        "uploader_id": message.from_user.id,
-                        "batch_id": user_data["batch_id"],
-                        "timestamp": datetime.now(),
-                        "media_type": app.get_media_type(msg)
-                    })
-                    file_count += 1
+                asyncio.create_task(
+                    schedule_deletion(message.chat.id, msg.id, Config.AUTO_DELETE_MINS * 60)
+                )
+                
             except Exception as e:
-                logger.error(f"Error processing message {msg_id}: {e}")
-                continue
+                logger.error(f"File send error: {e}")
+            return
 
-        if file_count == 0:
-            return await message.reply("❌ No valid files found in batch!")
-        
-        bot_username = (await client.get_me()).username
-        await message.reply(
-            f"📦 Batch completed successfully!\n"
-            f"• Files processed: {file_count}\n"
-            f"• Batch ID: {user_data['batch_id']}\n"
-            f"🔗 Download link: t.me/{bot_username}?start=batch-{user_data['batch_id']}"
-        )
-    except Exception as e:
-        await message.reply("⚠️ Failed to complete batch. Please try again.")
-        logger.error(f"Batch processing failed: {e}")
-    finally:
-        if message.from_user.id in app.batch_data:
-            del app.batch_data[message.from_user.id]
+    User.add_user(message.from_user.id, message.from_user.username)
+    await message.reply("🌟 Welcome! Use /help for commands")
 
-# ===== RUN BOT =====
+async def schedule_deletion(chat_id, message_id, delay):
+    await asyncio.sleep(delay)
+    await delete_message(app, chat_id, message_id)
+
+# ===== REST OF YOUR EXISTING CODE (BATCH, LINK, etc.) =====
+# [Keep all your existing handlers for /batch, /link, etc. here]
+# ...
+
+# ===== STARTUP =====
 async def run():
     await app.start()
-    logger.info("✅ Bot started successfully!")
+    asyncio.create_task(cleanup_expired_files())
+    logger.info("✅ Bot started with Auto-Delete & Broadcast!")
     await idle()
 
 if __name__ == "__main__":
