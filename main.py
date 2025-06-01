@@ -47,35 +47,32 @@ async def start(client, message):
         param = message.command[1]
         
         # Handle batch download
-        if param.startswith("batch-"):
-            file_ids = param.split("-")[1:]
-            for fid in file_ids:
-                try:
-                    await client.copy_message(
-                        chat_id=message.chat.id,
-                        from_chat_id=Config.DB_CHANNEL_ID,
-                        message_id=int(fid)
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to send file {fid}: {e}")
-            return
-            
-        # Handle single file download
-        file_data = File.collection.find_one({"$or": [
-            {"random_id": param},
-            {"file_id": param}
-        ]})
+        # In your main.py, look for the start command handler (something like this)
+@bot.on_message(filters.command("start"))
+async def start(client, message):
+    if len(message.command) > 1:
+        input_param = message.command[1]
         
-        if file_data:
+        # Check if it's a batch request
+        if input_param.startswith("batch-"):
+            batch_numbers = input_param[6:].split('-')  # Extract numbers after "batch-"
             try:
-                await client.copy_message(
-                    chat_id=message.chat.id,
-                    from_chat_id=Config.DB_CHANNEL_ID,
-                    message_id=int(file_data["file_id"])
-                )
-                return
-            except Exception as e:
-                logger.error(f"File send error: {e}")
+                # Process each batch number (28, 29, 30 in your case)
+                for num in batch_numbers:
+                    batch_num = int(num)
+                    # Your batch processing logic here
+                    await process_batch(batch_num, message)
+            except ValueError:
+                await message.reply("Invalid batch number format")
+        
+        # Existing code handling for normal file codes
+        elif len(input_param) == 8:  # Assuming codes are 8 chars like "hxhaUvJB"
+            await process_file_code(input_param, message)
+        else:
+            await message.reply("Invalid parameter")
+    else:
+        # Normal start command without parameters
+        await message.reply("Welcome message here")
 
     # Default start message
     User.add_user(message.from_user.id, message.from_user.username)
