@@ -3,11 +3,8 @@ import asyncio
 import logging
 import sys
 from config import Config
-from commands.admin import admin_handler
-from commands.batch import batch_handler, collect_handler, endbatch_handler
-from commands.files import link_handler
-from commands.user import start_handler, help_handler
 
+# Initialize bot first (no circular imports)
 class FileBot(Client):
     def __init__(self):
         super().__init__(
@@ -21,14 +18,20 @@ class FileBot(Client):
 
 app = FileBot()
 
+# Now import handlers
+from commands.admin import admin_handler
+from commands.batch import batch_handler, collect_handler, endbatch_handler
+from commands.files import link_handler
+from commands.user import start_handler, help_handler
+
 def register_handlers():
-    app.add_handler(admin.admin_handler)
-    app.add_handler(batch.batch_handler)
-    app.add_handler(batch.collect_handler)
-    app.add_handler(batch.endbatch_handler)
-    app.add_handler(files.link_handler)
-    app.add_handler(user.start_handler)
-    app.add_handler(user.help_handler)
+    app.add_handler(admin_handler)
+    app.add_handler(batch_handler)
+    app.add_handler(collect_handler)
+    app.add_handler(endbatch_handler)
+    app.add_handler(link_handler)
+    app.add_handler(start_handler)
+    app.add_handler(help_handler)
 
 async def run():
     await app.start()
@@ -36,12 +39,10 @@ async def run():
     await idle()
 
 if __name__ == "__main__":
-    # Configure logging
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
-    
     register_handlers()
     loop = asyncio.get_event_loop()
     try:
