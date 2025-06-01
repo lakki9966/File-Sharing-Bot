@@ -1,8 +1,8 @@
 from pyrogram import Client, filters, idle
 from config import Config
-from database.models import File, User
+from database.models import File, User, Admin
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
 class FileBot(Client):
     def __init__(self):
@@ -13,120 +13,122 @@ class FileBot(Client):
             bot_token=Config.BOT_TOKEN,
             in_memory=True
         )
-        self.batch_data = {}  # Temporary storage for batch uploads
+        self.batch_data = {}
 
 app = FileBot()
 
-# ===== SINGLE FILE UPLOAD =====
+# ===== CORE COMMANDS =====
+@app.on_message(filters.command("start"))
+async def start(client, message):
+    User.add_user(message.from_user.id, message.from_user.username)
+    await message.reply("""
+🌟 Welcome to File Share Bot!
+Use /help for all commands""")
+
+@app.on_message(filters.command("help"))
+async def help(client, message):
+    await message.reply("""
+📚 Available Commands:
+
+📁 File Sharing:
+/link - Share single file (reply to file)
+/batch - Start batch upload
+/endbatch - Finish batch
+
+👤 Account:
+/myfiles - View your files
+
+👑 Admin:
+/stats - Bot statistics
+/addadmin - Grant admin rights
+/setexpiry - Change expiry time
+""")
+
+# ===== FILE SHARING =====
 @app.on_message(filters.command("link"))
-async def single_upload(client, message):
+async def link(client, message):
     if not message.reply_to_message:
-        return await message.reply("❌ **Reply to a file with /link**")
+        return await message.reply("❌ Reply to a file with /link")
     
     try:
-        # Forward to storage channel
         forwarded = await message.reply_to_message.forward(Config.DB_CHANNEL_ID)
-        
-        # Save to MongoDB
         File.add_file({
             "file_id": str(forwarded.id),
-            "file_name": getattr(message.reply_to_message, "file_name", "file"),
-            "uploader_id": message.from_user.id,
-            "channel_msg_id": forwarded.id,
-            "is_batch": False  # Mark as single file
+            "type": "single",
+            "uploader_id": message.from_user.id
         })
-        
-        # Generate link
-        bot_username = (await client.get_me()).username
-        await message.reply(f"""
-✅ **File Stored!**
-📥 **Download Link:**
-`https://t.me/{bot_username}?start={forwarded.id}`
-""")
-    
+        await message.reply(f"🔗 Download: t.me/{(await client.get_me()).username}?start={forwarded.id}")
     except Exception as e:
-        await message.reply(f"⚠️ **Error:** `{str(e)}`")
+        await message.reply(f"⚠️ Error: {e}")
 
 # ===== BATCH UPLOAD =====
 @app.on_message(filters.command("batch"))
-async def start_batch(client, message):
-    """Start batch upload session"""
+async def batch(client, message):
     if not message.reply_to_message:
-        return await message.reply("❌ **Reply to first file with /batch**")
+        return await message.reply("❌ Reply to first file with /batch")
     
-    # Store batch info
     app.batch_data[message.from_user.id] = {
-        "first_msg_id": message.reply_to_message.id,
-        "last_msg_id": message.id,
+        "first_id": message.reply_to_message.id,
         "files": []
     }
-    
-    await message.reply("""
-📦 **Batch Mode Started!**
-Now send me all files you want to include
-When done, send /endbatch
-""")
+    await message.reply("📦 Batch started! Send files then /endbatch")
 
 @app.on_message(filters.command("endbatch"))
 async def end_batch(client, message):
-    """Finalize batch upload"""
-    user_id = message.from_user.id
-    if user_id not in app.batch_data:
-        return await message.reply("❌ **No active batch session!**")
+    user_data = app.batch_data.get(message.from_user.id)
+    if not user_data:
+        return await message.reply("❌ No active batch!")
     
-    batch = app.batch_data[user_id]
-    file_ids = list(range(batch["first_msg_id"], message.id + 1))
-    
-    # Process all files in batch
+    file_ids = list(range(user_data["first_id"], message.id + 1))
     saved_files = []
-    async for msg in client.get_messages(
-        chat_id=message.chat.id,
-        message_ids=file_ids
-    ):
+    
+    async for msg in client.get_messages(message.chat.id, file_ids):
         if msg.document or msg.photo or msg.video:
-            try:
-                # Forward to storage channel
-                forwarded = await msg.forward(Config.DB_CHANNEL_ID)
-                saved_files.append(str(forwarded.id))
-                
-                # Save to MongoDB
-                File.add_file({
-                    "file_id": str(forwarded.id),
-                    "file_name": getattr(msg, "file_name", "file"),
-                    "uploader_id": user_id,
-                    "channel_msg_id": forwarded.id,
-                    "is_batch": True,
-                    "batch_id": f"{user_id}-{datetime.now().timestamp()}"
-                })
-            except Exception as e:
-                print(f"Failed to save file: {e}")
+            forwarded = await msg.forward(Config.DB_CHANNEL_ID)
+            saved_files.append(str(forwarded.id))
+            File.add_file({
+                "file_id": str(forwarded.id),
+                "type": "batch",
+                "uploader_id": message.from_user.id,
+                "batch_id": f"batch-{message.from_user.id}-{datetime.now().timestamp()}"
+            })
     
-    # Generate batch download link
     if saved_files:
-        bot_username = (await client.get_me()).username
-        batch_link = f"https://t.me/{bot_username}?start=batch-{'-'.join(saved_files)}"
-        await message.reply(f"""
-📦 **Batch Upload Complete!**
-🔗 **Download All Files:**
-`{batch_link}`
-""")
+        await message.reply(f"📦 Batch complete!\n🔗 t.me/{(await client.get_me()).username}?start=batch-{'-'.join(saved_files)}")
     else:
-        await message.reply("❌ No valid files found in batch")
-    
-    # Cleanup
-    del app.batch_data[user_id]
+        await message.reply("❌ No valid files found")
+    del app.batch_data[message.from_user.id]
 
-# ===== START BOT =====
+# ===== ADMIN COMMANDS =====
+@app.on_message(filters.command("stats") & filters.user(Config.ADMIN_IDS))
+async def stats(client, message):
+    total_files = File.collection.count_documents({})
+    await message.reply(f"📊 Stats:\nTotal Files: {total_files}")
+
+@app.on_message(filters.command("addadmin") & filters.user(Config.ADMIN_IDS))
+async def add_admin(client, message):
+    try:
+        new_admin = int(message.text.split()[1])
+        Admin.add_admin(new_admin)
+        await message.reply(f"✅ Added admin {new_admin}")
+    except:
+        await message.reply("❌ Use: /addadmin [user_id]")
+
+@app.on_message(filters.command("setexpiry") & filters.user(Config.ADMIN_IDS))
+async def set_expiry(client, message):
+    try:
+        mins = int(message.text.split()[1])
+        Config.DEFAULT_EXPIRY = mins * 60
+        await message.reply(f"✅ Expiry set to {mins} minutes")
+    except:
+        await message.reply("❌ Use: /setexpiry [minutes]")
+
+# ===== RUN BOT =====
 async def run():
     await app.start()
-    print("✅ Bot is running with batch support!")
+    print("✅ All commands working!")
     await idle()
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
-    try:
-        loop.run_until_complete(run())
-    except KeyboardInterrupt:
-        print("Bot stopped by user")
-    finally:
-        loop.close()
+    loop.run_until_complete(run())
