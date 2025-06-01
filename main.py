@@ -7,7 +7,8 @@ from database.models import File, User, Admin
 import asyncio
 from datetime import datetime, timedelta
 import random
-import string  # Add this import
+import string
+import sys
 
 class FileBot(Client):
     def __init__(self):
@@ -27,29 +28,11 @@ class FileBot(Client):
 
 app = FileBot()
 
-# [Keep all other existing code exactly the same until /link command]
+# ===== ADMIN FILTER =====
+def admin_filter(_, __, message):
+    return Admin.is_admin(message.from_user.id)
 
-# ===== FILE SHARING =====
-@app.on_message(filters.command("link"))
-async def link(client, message):
-    if not message.reply_to_message:
-        return await message.reply("❌ Reply to a file with /link")
-    
-    try:
-        forwarded = await message.reply_to_message.forward(Config.DB_CHANNEL_ID)
-        random_id = app.generate_random_id()
-        File.add_file({
-            "file_id": str(forwarded.id),
-            "random_id": random_id,  # Add this line
-            "type": "single",
-            "uploader_id": message.from_user.id,
-            "timestamp": datetime.now()
-        })
-        await message.reply(f"🔗 Download: t.me/{(await client.get_me()).username}?start={random_id}")  # Use random_id here
-    except Exception as e:
-        await message.reply(f"⚠️ Error: {str(e)}")
-
-# [Keep all existing code exactly the same until start command]
+admin_only = filters.create(admin_filter)
 
 # ===== CORE COMMANDS =====
 @app.on_message(filters.command("start"))
@@ -57,7 +40,7 @@ async def start(client, message):
     if len(message.command) > 1:
         param = message.command[1]
         
-        # Handle batch download (unchanged)
+        # Handle batch download
         if param.startswith("batch-"):
             file_ids = param.split("-")[1:]
             for fid in file_ids:
@@ -71,11 +54,11 @@ async def start(client, message):
                     print(f"Failed to send file {fid}: {e}")
             return
             
-        # Handle single file download (modified)
-        # First try to find by random_id
-        file_data = File.collection.find_one({"random_id": param})
-        if not file_data and param.isdigit():  # Fallback to numeric ID
-            file_data = File.collection.find_one({"file_id": param})
+        # Handle single file download
+        file_data = File.collection.find_one({"$or": [
+            {"random_id": param},
+            {"file_id": param}
+        ]})
         
         if file_data:
             try:
@@ -87,11 +70,73 @@ async def start(client, message):
                 return
             except Exception as e:
                 print(f"File send error: {e}")
-        else:
-            print(f"File not found for param: {param}")
 
-    # Default start message (unchanged)
+    # Default start message
     User.add_user(message.from_user.id, message.from_user.username)
     await message.reply("🌟 Welcome to File Share Bot!\nUse /help for all commands")
 
-# [Keep all remaining code exactly the same]
+@app.on_message(filters.command("help"))
+async def help(client, message):
+    await message.reply("""
+📚 Available Commands:
+
+📁 File Sharing:
+/link - Share single file (reply to file)
+/batch - Start batch upload
+/endbatch - Finish batch
+
+👤 Account:
+/myfiles - View your files
+
+👑 Admin:
+/stats - Bot statistics
+/addadmin - Grant admin rights
+/setexpiry - Change expiry time
+""")
+
+# ===== FILE SHARING =====
+@app.on_message(filters.command("link"))
+async def link(client, message):
+    if not message.reply_to_message:
+        return await message.reply("❌ Reply to a file with /link")
+    
+    try:
+        forwarded = await message.reply_to_message.forward(Config.DB_CHANNEL_ID)
+        random_id = app.generate_random_id()
+        File.add_file({
+            "file_id": str(forwarded.id),
+            "random_id": random_id,
+            "type": "single",
+            "uploader_id": message.from_user.id,
+            "timestamp": datetime.now()
+        })
+        await message.reply(f"🔗 Download: t.me/{(await client.get_me()).username}?start={random_id}")
+    except Exception as e:
+        await message.reply(f"⚠️ Error: {str(e)}")
+
+# [Keep all your other existing commands exactly the same...]
+# ===== BATCH UPLOAD =====
+# [Keep your existing batch commands exactly as they are]
+# ===== ADMIN COMMANDS =====
+# [Keep your existing admin commands exactly as they are]
+
+# ===== RUN BOT =====
+async def run():
+    try:
+        await app.start()
+        print("✅ Bot started successfully!")
+        await idle()
+    except Exception as e:
+        print(f"❌ Bot failed to start: {str(e)}")
+    finally:
+        await app.stop()
+
+if __name__ == "__main__":
+    try:
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(run())
+    except KeyboardInterrupt:
+        print("Bot stopped by user")
+    except Exception as e:
+        print(f"Bot crashed: {str(e)}")
+        sys.exit(1)
