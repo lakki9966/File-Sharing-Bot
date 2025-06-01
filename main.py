@@ -1,8 +1,9 @@
 from pyrogram import Client, idle
 import asyncio
 import logging
+import sys
 from config import Config
-from .commands import admin, batch, files, user
+from commands import admin, batch, files, user  # Changed from relative to absolute import
 
 class FileBot(Client):
     def __init__(self):
@@ -32,6 +33,12 @@ async def run():
     await idle()
 
 if __name__ == "__main__":
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
     register_handlers()
     loop = asyncio.get_event_loop()
     try:
