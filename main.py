@@ -61,11 +61,12 @@ async def link(client, message):
         File.add_file({
             "file_id": str(forwarded.id),
             "type": "single",
-            "uploader_id": message.from_user.id
+            "uploader_id": message.from_user.id,
+            "timestamp": datetime.now()
         })
         await message.reply(f"🔗 Download: t.me/{(await client.get_me()).username}?start={forwarded.id}")
     except Exception as e:
-        await message.reply(f"⚠️ Error: {e}")
+        await message.reply(f"⚠️ Error: {str(e)}")
 
 # ===== BATCH UPLOAD =====
 @app.on_message(filters.command("batch"))
@@ -96,7 +97,8 @@ async def end_batch(client, message):
                 "file_id": str(forwarded.id),
                 "type": "batch",
                 "uploader_id": message.from_user.id,
-                "batch_id": f"batch-{message.from_user.id}-{datetime.now().timestamp()}"
+                "batch_id": f"batch-{message.from_user.id}-{datetime.now().timestamp()}",
+                "timestamp": datetime.now()
             })
     
     if saved_files:
@@ -108,40 +110,58 @@ async def end_batch(client, message):
 # ===== ADMIN COMMANDS =====
 @app.on_message(filters.command("stats") & admin_only)
 async def stats(client, message):
-    total_files = File.collection.count_documents({})
-    await message.reply(f"📊 Stats:\nTotal Files: {total_files}")
+    stats_text = f"""
+📊 Bot Statistics:
+Total Files: {File.collection.count_documents({})}
+Total Users: {User.collection.count_documents({})}
+Total Admins: {Admin.collection.count_documents({})}
+"""
+    await message.reply(stats_text)
 
 @app.on_message(filters.command("addadmin") & admin_only)
 async def add_admin(client, message):
     try:
         new_admin = int(message.text.split()[1])
-        Admin.add_admin(new_admin)
-        await message.reply(f"✅ Added admin {new_admin}")
-    except:
-        await message.reply("❌ Use: /addadmin [user_id]")
+        if Admin.is_admin(new_admin):
+            await message.reply("ℹ️ This user is already an admin")
+        else:
+            Admin.add_admin(new_admin)
+            await message.reply(f"✅ Added admin: {new_admin}")
+    except (IndexError, ValueError):
+        await message.reply("❌ Usage: /addadmin [user_id]")
 
 @app.on_message(filters.command("setexpiry") & admin_only)
 async def set_expiry(client, message):
     try:
         mins = int(message.text.split()[1])
-        Config.DEFAULT_EXPIRY = mins * 60
-        await message.reply(f"✅ Expiry set to {mins} minutes")
-    except:
-        await message.reply("❌ Use: /setexpiry [minutes]")
+        if 1 <= mins <= 1440:  # 1 minute to 24 hours
+            Config.DEFAULT_EXPIRY = mins * 60
+            await message.reply(f"✅ Expiry set to {mins} minutes")
+        else:
+            await message.reply("❌ Please enter between 1-1440 minutes")
+    except (IndexError, ValueError):
+        await message.reply("❌ Usage: /setexpiry [minutes]")
 
 # ===== INITIAL ADMIN SETUP =====
 async def setup_first_admin():
     if not Admin.collection.find_one():
-        # Add your user ID as first admin
-        Admin.add_admin(YOUR_USER_ID)  # Replace with your Telegram ID
+        Admin.add_admin(Config.OWNER_ID)
+        print(f"👑 Added initial admin: {Config.OWNER_ID}")
 
 # ===== RUN BOT =====
 async def run():
     await app.start()
-    await setup_first_admin()  # Ensure at least one admin exists
-    print("✅ Bot started with admin system!")
+    await setup_first_admin()
+    print("✅ Bot started successfully!")
     await idle()
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(run())
+    try:
+        loop.run_until_complete(run())
+    except KeyboardInterrupt:
+        print("Bot stopped by user")
+    except Exception as e:
+        print(f"Bot crashed: {str(e)}")
+    finally:
+        loop.close()
