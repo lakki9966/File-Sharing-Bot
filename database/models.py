@@ -2,6 +2,7 @@ from pymongo import MongoClient
 from config import Config
 from datetime import datetime
 
+# Database connection
 client = MongoClient(Config.DB_URI)
 db = client["FileShareBot"]
 
@@ -21,4 +22,32 @@ class File:
     def get_by_random_id(cls, random_id):
         return cls.collection.find_one({"random_id": random_id})
 
-# [Keep User and Admin classes exactly the same]
+class User:
+    collection = db["users"]
+    
+    @classmethod
+    def add_user(cls, user_id, username=None):
+        return cls.collection.update_one(
+            {"user_id": user_id},
+            {"$set": {"username": username, "last_seen": datetime.now()}},
+            upsert=True
+        )
+    
+    @classmethod
+    def get_user(cls, user_id):
+        return cls.collection.find_one({"user_id": user_id})
+
+class Admin:
+    collection = db["admins"]
+    
+    @classmethod
+    def add_admin(cls, user_id):
+        return cls.collection.update_one(
+            {"user_id": user_id},
+            {"$set": {"added_at": datetime.now()}},
+            upsert=True
+        )
+    
+    @classmethod
+    def is_admin(cls, user_id):
+        return cls.collection.find_one({"user_id": user_id}) is not None
