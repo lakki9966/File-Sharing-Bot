@@ -26,6 +26,35 @@ admin_only = filters.create(admin_filter)
 # ===== CORE COMMANDS =====
 @app.on_message(filters.command("start"))
 async def start(client, message):
+    if len(message.command) > 1:
+        file_id = message.command[1]
+        
+        # Handle batch download
+        if file_id.startswith("batch-"):
+            file_ids = file_id.split("-")[1:]
+            for fid in file_ids:
+                try:
+                    await client.copy_message(
+                        chat_id=message.chat.id,
+                        from_chat_id=Config.DB_CHANNEL_ID,
+                        message_id=int(fid)
+                    )
+                except Exception as e:
+                    print(f"Failed to send file {fid}: {e}")
+            return
+            
+        # Handle single file download
+        try:
+            await client.copy_message(
+                chat_id=message.chat.id,
+                from_chat_id=Config.DB_CHANNEL_ID,
+                message_id=int(file_id)
+            )
+            return
+        except Exception as e:
+            print(f"File send error: {e}")
+
+    # Default start message
     User.add_user(message.from_user.id, message.from_user.username)
     await message.reply("""
 🌟 Welcome to File Share Bot!
@@ -76,36 +105,63 @@ async def batch(client, message):
     
     app.batch_data[message.from_user.id] = {
         "first_id": message.reply_to_message.id,
-        "files": []
+        "chat_id": message.chat.id,
+        "last_message": None
     }
-    await message.reply("📦 Batch started! Send files then /endbatch")
+    await message.reply("📦 Batch started! Send other files now, then /endbatch")
 
 @app.on_message(filters.command("endbatch"))
 async def end_batch(client, message):
     user_data = app.batch_data.get(message.from_user.id)
     if not user_data:
-        return await message.reply("❌ No active batch!")
+        return await message.reply("❌ No active batch session!")
     
-    file_ids = list(range(user_data["first_id"], message.id + 1))
-    saved_files = []
-    
-    async for msg in client.get_messages(message.chat.id, file_ids):
-        if msg.document or msg.photo or msg.video:
-            forwarded = await msg.forward(Config.DB_CHANNEL_ID)
-            saved_files.append(str(forwarded.id))
-            File.add_file({
-                "file_id": str(forwarded.id),
-                "type": "batch",
-                "uploader_id": message.from_user.id,
-                "batch_id": f"batch-{message.from_user.id}-{datetime.now().timestamp()}",
-                "timestamp": datetime.now()
-            })
-    
-    if saved_files:
-        await message.reply(f"📦 Batch complete!\n🔗 t.me/{(await client.get_me()).username}?start=batch-{'-'.join(saved_files)}")
-    else:
-        await message.reply("❌ No valid files found")
-    del app.batch_data[message.from_user.id]
+    try:
+        # Get all messages between first and /endbatch
+        messages = []
+        async for msg in client.get_messages(
+            chat_id=user_data["chat_id"],
+            message_ids=range(user_data["first_id"], message.id + 1)
+        ):
+            if msg.document or msg.photo or msg.video:
+                messages.append(msg)
+        
+        if not messages:
+            return await message.reply("❌ No valid files found!")
+        
+        # Forward all files to channel
+        file_ids = []
+        for msg in messages:
+            try:
+                forwarded = await msg.forward(Config.DB_CHANNEL_ID)
+                file_ids.append(str(forwarded.id))
+                
+                File.add_file({
+                    "file_id": str(forwarded.id),
+                    "type": "batch",
+                    "uploader_id": message.from_user.id,
+                    "batch_id": f"batch-{message.from_user.id}-{datetime.now().timestamp()}",
+                    "timestamp": datetime.now()
+                })
+            except Exception as e:
+                print(f"Failed to save file: {e}")
+        
+        # Generate batch link
+        if file_ids:
+            bot_username = (await client.get_me()).username
+            await message.reply(
+                f"📦 Batch complete!\n"
+                f"🔗 t.me/{bot_username}?start=batch-{'-'.join(file_ids)}"
+            )
+        else:
+            await message.reply("❌ Failed to save any files")
+            
+    except Exception as e:
+        await message.reply(f"⚠️ Batch error: {str(e)}")
+    finally:
+        # Cleanup
+        if message.from_user.id in app.batch_data:
+            del app.batch_data[message.from_user.id]
 
 # ===== ADMIN COMMANDS =====
 @app.on_message(filters.command("stats") & admin_only)
