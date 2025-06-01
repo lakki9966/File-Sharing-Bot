@@ -6,6 +6,7 @@ from datetime import datetime
 import random
 import string
 import logging
+import sys
 
 # Setup logging
 logging.basicConfig(
@@ -28,6 +29,22 @@ class FileBot(Client):
     def generate_random_id(self, length=8):
         chars = string.ascii_letters + string.digits
         return ''.join(random.choice(chars) for _ in range(length))
+    
+    def get_media_type(self, message):
+        """Determine the media type of the message"""
+        if message.document:
+            return "document"
+        elif message.photo:
+            return "photo"
+        elif message.video:
+            return "video"
+        elif message.sticker:
+            return "sticker"
+        elif message.animation:  # GIFs are considered animations in Telegram
+            return "gif"
+        elif message.text:
+            return "text"
+        return "unknown"
 
 app = FileBot()
 
@@ -173,28 +190,12 @@ async def link(client, message):
             "type": "single",
             "uploader_id": message.from_user.id,
             "timestamp": datetime.now(),
-            "media_type": self.get_media_type(message.reply_to_message)
+            "media_type": app.get_media_type(message.reply_to_message)
         })
         await message.reply(f"🔗 Download: t.me/{(await client.get_me()).username}?start={random_id}")
     except Exception as e:
         await message.reply(f"⚠️ Error: {str(e)}")
         logger.error(f"Link error: {e}")
-
-def get_media_type(self, message):
-    """Determine the media type of the message"""
-    if message.document:
-        return "document"
-    elif message.photo:
-        return "photo"
-    elif message.video:
-        return "video"
-    elif message.sticker:
-        return "sticker"
-    elif message.animation:  # GIFs are considered animations in Telegram
-        return "gif"
-    elif message.text:
-        return "text"
-    return "unknown"
 
 # ===== BATCH UPLOAD =====
 @app.on_message(filters.command("batch"))
@@ -219,12 +220,15 @@ async def end_batch(client, message):
     
     try:
         file_count = 0
-        for msg_id in range(user_data["first_id"], message.id + 1):
+        async for msg in client.get_chat_history(
+            chat_id=user_data["chat_id"],
+            offset_id=user_data["first_id"]-1,
+            reverse=True
+        ):
+            if msg.id > message.id:
+                break
+                
             try:
-                msg = await client.get_messages(
-                    chat_id=user_data["chat_id"],
-                    message_ids=msg_id
-                )
                 # Check for supported media types
                 if (msg.document or msg.photo or msg.video or 
                     msg.sticker or msg.animation or msg.text):
@@ -236,11 +240,11 @@ async def end_batch(client, message):
                         "uploader_id": message.from_user.id,
                         "batch_id": user_data["batch_id"],
                         "timestamp": datetime.now(),
-                        "media_type": self.get_media_type(msg)
+                        "media_type": app.get_media_type(msg)
                     })
                     file_count += 1
             except Exception as e:
-                logger.error(f"Error processing message {msg_id}: {e}")
+                logger.error(f"Error processing message {msg.id}: {e}")
 
         if file_count == 0:
             return await message.reply("❌ No valid files found!")
