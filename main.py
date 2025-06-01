@@ -26,7 +26,6 @@ class FileBot(Client):
         self.batch_data = {}
     
     def generate_random_id(self, length=8):
-        """Generate random alphanumeric string"""
         chars = string.ascii_letters + string.digits
         return ''.join(random.choice(chars) for _ in range(length))
 
@@ -46,7 +45,6 @@ async def start(client, message):
     if len(message.command) > 1:
         param = message.command[1]
         
-        # Handle batch download
         if param.startswith("batch-"):
             batch_id = param.split("-")[1]
             batch_files = File.collection.find({"batch_id": batch_id})
@@ -66,7 +64,6 @@ async def start(client, message):
             await message.reply(f"📦 Sent {sent_count} files from batch")
             return
             
-        # Handle single file download
         file_data = File.collection.find_one({"random_id": param})
         if file_data:
             try:
@@ -79,9 +76,97 @@ async def start(client, message):
             except Exception as e:
                 logger.error(f"File send error: {e}")
 
-    # Default start message
     User.add_user(message.from_user.id, message.from_user.username)
     await message.reply("🌟 Welcome to File Share Bot!\nUse /help for all commands")
+
+# ===== HELP COMMAND =====
+@app.on_message(filters.command("help"))
+async def help(client, message):
+    help_text = """
+📚 Available Commands:
+
+📁 File Sharing:
+/link - Generate file link (reply to file)
+/batch - Start batch upload
+/endbatch - Finish batch
+
+👤 Account:
+/myfiles - View your uploaded files
+
+👑 Admin Commands:
+/stats - View bot statistics
+/addadmin [user_id] - Add admin
+/removeadmin [user_id] - Remove admin
+/setexpiry [minutes] - Set file expiry
+/verify - Check your admin status
+"""
+    await message.reply(help_text)
+
+# ===== ADMIN COMMANDS =====
+@app.on_message(filters.command("stats") & admin_only)
+async def stats(client, message):
+    try:
+        stats_text = f"""
+📊 Bot Statistics:
+├ Files: {File.collection.count_documents({})}
+├ Users: {User.collection.count_documents({})}
+└ Admins: {Admin.collection.count_documents({})}
+
+⚙️ Configuration:
+├ DB Channel: {Config.DB_CHANNEL_ID}
+└ Owner ID: {Config.OWNER_ID}
+"""
+        await message.reply(stats_text)
+    except Exception as e:
+        await message.reply(f"⚠️ Error: {str(e)}")
+        logger.exception("Stats command failed")
+
+@app.on_message(filters.command("addadmin") & admin_only)
+async def add_admin(client, message):
+    try:
+        if len(message.command) < 2:
+            return await message.reply("❌ Usage: /addadmin [user_id]")
+        
+        new_admin = int(message.command[1])
+        Admin.add_admin(new_admin)
+        await message.reply(f"✅ Added admin: {new_admin}")
+    except Exception as e:
+        await message.reply(f"⚠️ Error: {str(e)}")
+        logger.exception("Addadmin failed")
+
+@app.on_message(filters.command("removeadmin") & admin_only)
+async def remove_admin(client, message):
+    try:
+        if len(message.command) < 2:
+            return await message.reply("❌ Usage: /removeadmin [user_id]")
+        
+        admin_id = int(message.command[1])
+        Admin.collection.delete_one({"user_id": admin_id})
+        await message.reply(f"✅ Removed admin: {admin_id}")
+    except Exception as e:
+        await message.reply(f"⚠️ Error: {str(e)}")
+        logger.exception("Removeadmin failed")
+
+# ===== FILE SHARING =====
+@app.on_message(filters.command("link"))
+async def link(client, message):
+    if not message.reply_to_message:
+        return await message.reply("❌ Reply to a file with /link")
+    
+    try:
+        forwarded = await message.reply_to_message.forward(Config.DB_CHANNEL_ID)
+        random_id = app.generate_random_id()
+        File.add_file({
+            "file_id": str(forwarded.id),
+            "random_id": random_id,
+            "type": "single",
+            "uploader_id": message.from_user.id,
+            "timestamp": datetime.now()
+        })
+        await message.reply(f"🔗 Download: t.me/{(await client.get_me()).username}?start={random_id}")
+    except Exception as e:
+        await message.reply(f"⚠️ Error: {str(e)}")
+        logger.error(f"Link error: {e}")
 
 # ===== BATCH UPLOAD =====
 @app.on_message(filters.command("batch"))
@@ -96,10 +181,7 @@ async def batch(client, message):
         "batch_id": batch_id,
         "file_count": 0
     }
-    await message.reply(
-        f"📦 Batch started! ID: {batch_id}\n"
-        "Send other files now, then /endbatch"
-    )
+    await message.reply(f"📦 Batch started! ID: {batch_id}\nSend other files now, then /endbatch")
 
 @app.on_message(filters.command("endbatch"))
 async def end_batch(client, message):
@@ -144,7 +226,6 @@ async def end_batch(client, message):
         if message.from_user.id in app.batch_data:
             del app.batch_data[message.from_user.id]
 
-# [Keep all other commands like /link, /stats, etc. unchanged]
 # ===== RUN BOT =====
 async def run():
     await app.start()
