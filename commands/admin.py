@@ -1,5 +1,5 @@
 from pyrogram import filters
-from bot.utilities.filters import admin_only
+from utilities.filters import admin_only
 from config import Config
 from database.models import Admin, User, File
 from bot import app
