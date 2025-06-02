@@ -2,10 +2,8 @@ from pyrogram import filters
 from utilities.filters import admin_only
 from config import Config
 from database.models import Admin, User, File
-from main import app  
-import logging
 
-logger = logging.getLogger(__name__)
+app = None  # Will be set by main.py
 
 @admin_only
 async def stats(client, message):
@@ -23,7 +21,6 @@ async def stats(client, message):
         await message.reply(stats_text)
     except Exception as e:
         await message.reply(f"⚠️ Error: {str(e)}")
-        logger.exception("Stats command failed")
 
 @admin_only 
 async def add_admin(client, message):
