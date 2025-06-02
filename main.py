@@ -4,19 +4,17 @@ import logging
 import sys
 from config import Config
 
-# Initialize bot first (no circular imports)
-class FileBot(Client):
-    def __init__(self):
-        super().__init__(
-            "file_bot",
-            api_id=Config.API_ID,
-            api_hash=Config.API_HASH,
-            bot_token=Config.BOT_TOKEN,
-            in_memory=True
-        )
-        self.batch_data = {}
-
-app = FileBot()
+# Initialize the app first
+app = Client(
+    "file_bot",
+    api_id=Config.API_ID,
+    api_hash=Config.API_HASH,
+    bot_token=Config.BOT_TOKEN,
+    in_memory=True
+)
+from utilities.set_app import init_app
+init_app(app)  # This shares the app instance with all modules
+app.batch_data = {}
 
 # Now import handlers
 from commands.admin import admin_handler
