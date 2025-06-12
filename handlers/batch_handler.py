@@ -3,22 +3,23 @@
 from pyrogram import Client
 from pyrogram.types import Message
 from config import DB_CHANNEL, DOMAIN
-from middleware.access_control import reject_if_not_admin
+from middleware.access_control import reject_if_not_owner
 from database.mongodb import batch_col
 from utils.shortener import generate_shortlink
 
 async def handle_batch(bot: Client, message: Message):
-    if not await reject_if_not_admin(message):
+    # Only owner can use this
+    if await reject_if_not_owner(message):
         return
 
     if not message.reply_to_message:
         await message.reply_text("⚠️ Reply to the first message of a file group with `/batch`.")
         return
 
-    # Collect messages in reply thread (simulate batch group)
+    # Start scanning from replied message
     chat_id = message.chat.id
     start_id = message.reply_to_message.id
-    batch_size = 10  # You can change this limit if needed
+    batch_size = 10  # Max 10 messages per batch
 
     forwarded_ids = []
 
@@ -29,25 +30,26 @@ async def handle_batch(bot: Client, message: Message):
                 fwd = await msg.forward(DB_CHANNEL)
                 forwarded_ids.append(fwd.id)
         except:
-            break  # Reached end or error
+            break
 
     if not forwarded_ids:
         await message.reply_text("❌ No media found to forward.")
         return
 
-    # Generate shortlink ID
+    # Generate shortlink
     short_id = generate_shortlink()
 
-    # Save batch info
+    # Save in DB
     batch_col.insert_one({
         "short_id": short_id,
         "first_id": forwarded_ids[0],
         "last_id": forwarded_ids[-1],
+        "chat_id": DB_CHANNEL,
         "owner_id": message.from_user.id
     })
 
-    # Send batch shortlink to admin
-    link = f"{DOMAIN}/batch/{short_id}"
+    # Reply with shortlink
+    link = f"{DOMAIN}/{short_id}"
     await message.reply_text(
         f"✅ Batch saved!\n\n🔗 Your batch shortlink:\n`{link}`",
         disable_web_page_preview=True
