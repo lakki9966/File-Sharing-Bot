@@ -46,7 +46,7 @@ async def handle_link(bot: Client, message: Message):
     })
 
     # Create shortlink
-    link = f"{DOMAIN}/{short_id}"
+    link = f"https://t.me/{BOT_USERNAME}?start={short_id}"
 
     # Send success message
     await message.reply_text(
