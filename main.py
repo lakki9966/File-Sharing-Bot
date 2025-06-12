@@ -12,9 +12,9 @@ bot.add_handler(bot.on_message(filters.command("batch"))(batch_handler.handle_ba
 bot.add_handler(bot.on_message(filters.command(["broadcast", "users", "addadmin", "removeadmin", "setexpiry"]))(admin.handle_admin))
 bot.add_handler(bot.on_message(filters.text & filters.private)(access_handler.handle_shortlink))
 
-@bot.on_start
-async def _startup(client):
+async def _startup():
     print("✅ Bot Started Successfully!")
-    client.loop.create_task(start_cleanup_job(client))
+    bot.loop.create_task(start_cleanup_job(bot))
 
-bot.run()
+if __name__ == "__main__":
+    bot.run(on_startup=_startup)
