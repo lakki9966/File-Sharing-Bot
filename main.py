@@ -11,7 +11,7 @@ bot = Client("file_share_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_T
 
 async def start_bot():
     print("Bot Started Successfully!")
-    await start_cleanup_job(bot)  # Background job to auto delete PM messages
+    bot.loop.create_task(start_cleanup_job(bot))  # Background job to auto delete PM messages
 
 if __name__ == "__main__":
     bot.add_handler(MessageHandler(start.start_command, filters.command("start")))
