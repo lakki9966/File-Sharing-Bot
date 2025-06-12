@@ -1,52 +1,23 @@
-from pyrogram import Client, idle
-import asyncio
-import logging
-import sys
-from config import Config
+# main.py
 
-# Initialize the app first
-app = Client(
-    "file_bot",
-    api_id=Config.API_ID,
-    api_hash=Config.API_HASH,
-    bot_token=Config.BOT_TOKEN,
-    in_memory=True
-)
-from utilities.set_app import init_app
-init_app(app)  # This shares the app instance with all modules
-app.batch_data = {}
+from pyrogram import Client, filters
+from pyrogram.handlers import MessageHandler
+from config import API_ID, API_HASH, BOT_TOKEN
+from handlers import start, link_handler, batch_handler, access_handler, admin
+from utils.cleanup import start_cleanup_job
 
-# Now import handlers
-from commands.admin import admin_handler
-from commands.batch import batch_handler, collect_handler, endbatch_handler
-from commands.files import link_handler
-from commands.user import start_handler, help_handler
+bot = Client("file_share_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-def register_handlers():
-    app.add_handler(admin_handler)
-    app.add_handler(batch_handler)
-    app.add_handler(collect_handler)
-    app.add_handler(endbatch_handler)
-    app.add_handler(link_handler)
-    app.add_handler(start_handler)
-    app.add_handler(help_handler)
 
-async def run():
-    await app.start()
-    logging.info("✅ Bot started successfully!")
-    await idle()
+async def start_bot():
+    print("Bot Started Successfully!")
+    await start_cleanup_job(bot)  # Background job to auto delete PM messages
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    register_handlers()
-    loop = asyncio.get_event_loop()
-    try:
-        loop.run_until_complete(run())
-    except KeyboardInterrupt:
-        logging.info("Bot stopped by user")
-    except Exception as e:
-        logging.critical(f"Bot crashed: {str(e)}")
-        sys.exit(1)
+    bot.add_handler(MessageHandler(start.start_command, filters.command("start")))
+    bot.add_handler(MessageHandler(link_handler.handle_link, filters.command("link")))
+    bot.add_handler(MessageHandler(batch_handler.handle_batch, filters.command("batch")))
+    bot.add_handler(MessageHandler(admin.handle_admin, filters.command(["broadcast", "users", "addadmin", "removeadmin", "setexpiry"])))
+    bot.add_handler(MessageHandler(access_handler.handle_shortlink, filters.text & filters.private))
+
+    bot.run(start_bot())
