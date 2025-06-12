@@ -1,31 +1,30 @@
-# utils/spam_control.py
-
-import time
+from time import time
 from collections import defaultdict
-from pyrogram import Client
-from pyrogram.types import Message
 
-user_messages = defaultdict(list)
-user_block_until = defaultdict(float)
+# In-memory tracker
+user_msg_times = defaultdict(list)
+LIMIT = 5   # Max messages
+WINDOW = 1  # In how many seconds
+MUTE_TIME = 300  # Mute 5 mins
 
-MUTE_SECONDS = 300  # 5 minutes
+# Track muted users
+muted_users = {}
 
-async def check_spam(bot: Client, message: Message) -> bool:
+async def check_spam(bot, message):
     user_id = message.from_user.id
-    now = time.time()
+    now = time()
 
-    # Already in cooldown
-    if now < user_block_until[user_id]:
-        return True  # Ignore message
+    # Check if muted
+    if user_id in muted_users and now < muted_users[user_id]:
+        return True
 
-    # Keep only last 1 second messages
-    user_messages[user_id] = [t for t in user_messages[user_id] if now - t < 1]
-    user_messages[user_id].append(now)
+    # Update message timestamps
+    user_msg_times[user_id].append(now)
+    user_msg_times[user_id] = [t for t in user_msg_times[user_id] if now - t < WINDOW]
 
-    # If too fast
-    if len(user_messages[user_id]) > 5:
-        user_block_until[user_id] = now + MUTE_SECONDS
-        await message.reply_text("⛔ You're sending too fast! Try again after 5 minutes.")
+    if len(user_msg_times[user_id]) > LIMIT:
+        muted_users[user_id] = now + MUTE_TIME
+        await message.reply_text("⛔ Too many messages! Try again in 5 mins.")
         return True
 
     return False
