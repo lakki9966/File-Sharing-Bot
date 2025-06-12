@@ -2,7 +2,7 @@
 
 from pyrogram import Client
 from pyrogram.types import Message
-from config import DB_CHANNEL, DOMAIN
+from config import DB_CHANNEL, BOT_USERNAME
 from middleware.access_control import reject_if_not_owner
 from database.mongodb import batch_col
 from utils.shortener import generate_shortlink
