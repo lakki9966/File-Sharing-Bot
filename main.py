@@ -1,8 +1,7 @@
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from handlers import start, link_handler, batch_handler, access_handler, admin
 from utils.cleanup import start_cleanup_job
 from config import API_ID, API_HASH, BOT_TOKEN
-from pyrogram.idle import idle
 import asyncio
 
 bot = Client(
@@ -22,7 +21,7 @@ async def main():
     await bot.start()
     print("✅ Bot Started Successfully!")
     asyncio.create_task(start_cleanup_job(bot))
-    await idle()   # Correct way to idle in old pyrogram versions
+    await idle()
     await bot.stop()
 
 if __name__ == "__main__":
