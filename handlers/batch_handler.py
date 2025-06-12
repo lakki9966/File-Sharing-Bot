@@ -49,7 +49,7 @@ async def handle_batch(bot: Client, message: Message):
     })
 
     # Reply with shortlink
-    link = f"{DOMAIN}/{short_id}"
+    link = f"https://t.me/{BOT_USERNAME}?start=batch_{short_id}"
     await message.reply_text(
         f"✅ Batch saved!\n\n🔗 Your batch shortlink:\n`{link}`",
         disable_web_page_preview=True
