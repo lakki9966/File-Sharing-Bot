@@ -1,54 +1,49 @@
-# handlers/admin.py
-
-from pyrogram import Client, filters
+from pyrogram import Client
 from pyrogram.types import Message
 from database.mongodb import users_col, admins_col
-from utils.admin_check import is_admin
-from utils.broadcast import broadcast_message
-
+from middleware.access_control import reject_if_not_owner
 
 async def handle_admin(bot: Client, message: Message):
-    if not await is_admin(message.from_user.id):
-        await message.reply_text("❌ You are not authorized.")
+    if await reject_if_not_owner(message):
         return
 
-    cmd = message.command[0]
+    command = message.command[0]
+    args = message.command[1:]
 
-    # /broadcast
-    if cmd == "broadcast":
+    if command == "broadcast":
         if not message.reply_to_message:
-            await message.reply_text("Reply to a message to broadcast it.")
+            await message.reply_text("⚠️ Reply to a message to broadcast.")
             return
-        await broadcast_message(bot, message)
-        return
 
-    # /users
-    elif cmd == "users":
-        total = users_col.count_documents({})
-        await message.reply_text(f"👥 Total Users: {total}")
-        return
+        total, failed = 0, 0
+        async for user in users_col.find():
+            try:
+                await message.reply_to_message.copy(chat_id=user["user_id"])
+                total += 1
+            except:
+                failed += 1
 
-    # /addadmin user_id
-    elif cmd == "addadmin":
-        if len(message.command) < 2:
-            await message.reply_text("Usage: /addadmin <user_id>")
+        await message.reply_text(f"📢 Broadcast complete!\n✅ Sent: {total}\n❌ Failed: {failed}")
+
+    elif command == "users":
+        count = await users_col.count_documents({})
+        await message.reply_text(f"👥 Total users: `{count}`")
+
+    elif command == "addadmin":
+        if not args:
+            await message.reply_text("⚠️ Usage: /addadmin user_id")
             return
-        user_id = int(message.command[1])
-        admins_col.update_one({"_id": user_id}, {"$set": {"role": "admin"}}, upsert=True)
-        await message.reply_text(f"✅ Added {user_id} as admin.")
-        return
+        user_id = int(args[0])
+        admins_col.update_one({"user_id": user_id}, {"$set": {"user_id": user_id}}, upsert=True)
+        await message.reply_text(f"✅ Admin added: `{user_id}`")
 
-    # /removeadmin user_id
-    elif cmd == "removeadmin":
-        if len(message.command) < 2:
-            await message.reply_text("Usage: /removeadmin <user_id>")
+    elif command == "removeadmin":
+        if not args:
+            await message.reply_text("⚠️ Usage: /removeadmin user_id")
             return
-        user_id = int(message.command[1])
-        admins_col.delete_one({"_id": user_id})
-        await message.reply_text(f"❌ Removed {user_id} from admins.")
-        return
+        user_id = int(args[0])
+        admins_col.delete_one({"user_id": user_id})
+        await message.reply_text(f"❌ Admin removed: `{user_id}`")
 
-    # /setexpiry <minutes>
-    elif cmd == "setexpiry":
-        await message.reply_text("🛠 Expiry system not yet dynamic. Current: 30 mins (default). Future support planned.")
-        return
+    elif command == "setexpiry":
+        await message.reply_text("⚙️ This feature will be added soon for custom expiry.")
