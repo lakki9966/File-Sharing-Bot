@@ -1,4 +1,4 @@
-from pyrogram import Client, filters, idle
+from pyrogram import Client, filters
 from handlers import start, link_handler, batch_handler, access_handler, admin
 from utils.cleanup import start_cleanup_job
 from config import API_ID, API_HASH, BOT_TOKEN
@@ -12,10 +12,9 @@ bot.add_handler(bot.on_message(filters.command("batch"))(batch_handler.handle_ba
 bot.add_handler(bot.on_message(filters.command(["broadcast", "users", "addadmin", "removeadmin", "setexpiry"]))(admin.handle_admin))
 bot.add_handler(bot.on_message(filters.text & filters.private)(access_handler.handle_shortlink))
 
-async def _startup():
+@bot.on_start
+async def _startup(client):
     print("✅ Bot Started Successfully!")
-    bot.loop.create_task(start_cleanup_job(bot))
+    client.loop.create_task(start_cleanup_job(client))
 
-if __name__ == "__main__":
-    bot.run(_startup())
-    idle()  # Keeps the bot alive
+bot.run()
