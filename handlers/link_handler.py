@@ -6,10 +6,13 @@ from config import DB_CHANNEL, DOMAIN
 from middleware.access_control import reject_if_not_admin
 from database.mongodb import files_col
 from utils.shortener import generate_shortlink
+from utils.spam_control import check_spam
 import random
 import string
 
 async def handle_link(bot: Client, message: Message):
+    if await check_spam(bot, message):
+    return
     if not await reject_if_not_admin(message):
         return
 
