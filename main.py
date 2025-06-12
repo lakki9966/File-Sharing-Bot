@@ -1,7 +1,8 @@
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from handlers import start, link_handler, batch_handler, access_handler, admin
 from utils.cleanup import start_cleanup_job
 from config import API_ID, API_HASH, BOT_TOKEN
+import asyncio
 
 bot = Client("file_share_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
@@ -26,12 +27,12 @@ async def admin_handler_func(client, message):
 async def access_handler_func(client, message):
     await access_handler.handle_shortlink(client, message)
 
-# Startup task
-async def start_cleanup():
+async def main():
+    await bot.start()
     print("✅ Bot Started Successfully!")
     bot.loop.create_task(start_cleanup_job(bot))
-
-bot.add_task(start_cleanup())
+    await idle()  # Keeps the bot running
+    await bot.stop()
 
 if __name__ == "__main__":
-    bot.run()
+    asyncio.run(main())
