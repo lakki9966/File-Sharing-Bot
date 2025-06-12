@@ -1,9 +1,10 @@
-# main.py
+# main.py (Heroku-friendly, no loop conflicts)
 from pyrogram import Client, filters
 from pyrogram.handlers import MessageHandler
 from handlers import start, link_handler, batch_handler, access_handler, admin
 from utils.cleanup import start_cleanup_job
 from config import API_ID, API_HASH, BOT_TOKEN
+from pyrogram.idle import idle
 import asyncio
 
 bot = Client("file_share_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -15,11 +16,11 @@ bot.add_handler(MessageHandler(batch_handler.handle_batch, filters.command("batc
 bot.add_handler(MessageHandler(admin.handle_admin, filters.command(["broadcast", "users", "addadmin", "removeadmin", "setexpiry"])))
 bot.add_handler(MessageHandler(access_handler.handle_shortlink, filters.text & filters.private))
 
-async def main():
-    print("✅ Bot Started Successfully!")
+async def start_bot():
     await bot.start()
-    bot.loop.create_task(start_cleanup_job(bot))
-    await asyncio.Event().wait()  # wait forever
+    print("✅ Bot Started Successfully!")
+    asyncio.create_task(start_cleanup_job(bot))
+    await idle()  # Keeps the bot running
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(start_bot())
