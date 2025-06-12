@@ -3,22 +3,26 @@
 from pyrogram import Client
 from pyrogram.types import Message
 from config import DB_CHANNEL, DOMAIN
-from middleware.access_control import reject_if_not_admin
+from middleware.access_control import reject_if_not_owner
 from database.mongodb import files_col
 from utils.shortener import generate_shortlink
 from utils.spam_control import check_spam
-import random
-import string
 
 async def handle_link(bot: Client, message: Message):
+    # Anti-spam check
     if await check_spam(bot, message):
-    return
-    if not await reject_if_not_admin(message):
         return
 
+    # Only owner allowed
+    if await reject_if_not_owner(message):
+        return
+
+    # Must be a reply to a file
     if not message.reply_to_message or not (
-        message.reply_to_message.document or message.reply_to_message.video or 
-        message.reply_to_message.audio or message.reply_to_message.photo or 
+        message.reply_to_message.document or
+        message.reply_to_message.video or
+        message.reply_to_message.audio or
+        message.reply_to_message.photo or
         message.reply_to_message.sticker
     ):
         await message.reply_text("⚠️ Reply to a file (any type) with `/link` to create shortlink.")
@@ -26,7 +30,7 @@ async def handle_link(bot: Client, message: Message):
 
     media_msg = message.reply_to_message
 
-    # Forward to DB channel
+    # Forward file to DB_CHANNEL
     forwarded = await media_msg.forward(DB_CHANNEL)
 
     # Generate unique short ID
@@ -41,9 +45,11 @@ async def handle_link(bot: Client, message: Message):
         "owner_id": message.from_user.id
     })
 
-    # Send shortlink to admin
+    # Create shortlink
     link = f"{DOMAIN}/{short_id}"
+
+    # Send success message
     await message.reply_text(
         f"✅ File saved!\n\n🔗 Your shortlink:\n`{link}`\n\nAnyone with this link can access the file.",
         disable_web_page_preview=True
-    )
+        )
