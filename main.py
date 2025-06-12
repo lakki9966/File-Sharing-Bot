@@ -1,26 +1,24 @@
-# main.py (Heroku-friendly, no loop conflicts)
-from pyrogram import Client, filters
-from pyrogram.handlers import MessageHandler
+import asyncio
+from pyrogram import Client, filters, idle
 from handlers import start, link_handler, batch_handler, access_handler, admin
 from utils.cleanup import start_cleanup_job
 from config import API_ID, API_HASH, BOT_TOKEN
-from pyrogram.idle import idle
-import asyncio
 
 bot = Client("file_share_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# Register handlers correctly
-bot.add_handler(MessageHandler(start.start_command, filters.command("start")))
-bot.add_handler(MessageHandler(link_handler.handle_link, filters.command("link")))
-bot.add_handler(MessageHandler(batch_handler.handle_batch, filters.command("batch")))
-bot.add_handler(MessageHandler(admin.handle_admin, filters.command(["broadcast", "users", "addadmin", "removeadmin", "setexpiry"])))
-bot.add_handler(MessageHandler(access_handler.handle_shortlink, filters.text & filters.private))
+# Register handlers
+bot.add_handler(bot.on_message(filters.command("start"))(start.start_command))
+bot.add_handler(bot.on_message(filters.command("link"))(link_handler.handle_link))
+bot.add_handler(bot.on_message(filters.command("batch"))(batch_handler.handle_batch))
+bot.add_handler(bot.on_message(filters.command(["broadcast", "users", "addadmin", "removeadmin", "setexpiry"]))(admin.handle_admin))
+bot.add_handler(bot.on_message(filters.text & filters.private)(access_handler.handle_shortlink))
 
-async def start_bot():
+async def main():
     await bot.start()
     print("✅ Bot Started Successfully!")
     asyncio.create_task(start_cleanup_job(bot))
-    await idle()  # Keeps the bot running
+    await idle()
+    await bot.stop()
 
 if __name__ == "__main__":
-    asyncio.run(start_bot())
+    asyncio.run(main())
