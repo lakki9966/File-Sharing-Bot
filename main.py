@@ -1,8 +1,8 @@
-# main.py
 from pyrogram import Client, filters
 from handlers import start, link_handler, batch_handler, access_handler, admin
 from utils.cleanup import start_cleanup_job
 from config import API_ID, API_HASH, BOT_TOKEN
+from pyrogram.idle import idle
 import asyncio
 
 bot = Client(
@@ -12,7 +12,6 @@ bot = Client(
     bot_token=BOT_TOKEN
 )
 
-# Handlers registration
 bot.add_handler(bot.on_message(filters.command("start"))(start.start_command))
 bot.add_handler(bot.on_message(filters.command("link"))(link_handler.handle_link))
 bot.add_handler(bot.on_message(filters.command("batch"))(batch_handler.handle_batch))
@@ -20,11 +19,11 @@ bot.add_handler(bot.on_message(filters.command(["broadcast", "users", "addadmin"
 bot.add_handler(bot.on_message(filters.text & filters.private)(access_handler.handle_shortlink))
 
 async def main():
-    print("✅ Bot Started Successfully!")
-    # Start cleanup job in the background
-    asyncio.create_task(start_cleanup_job(bot))
     await bot.start()
-    await bot.idle()
+    print("✅ Bot Started Successfully!")
+    asyncio.create_task(start_cleanup_job(bot))
+    await idle()   # Correct way to idle in old pyrogram versions
+    await bot.stop()
 
 if __name__ == "__main__":
     asyncio.run(main())
