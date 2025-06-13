@@ -20,7 +20,7 @@ bot.add_handler(bot.on_message(filters.text & filters.private)(access_handler.ha
 async def main():
     await bot.start()
     print("✅ Bot Started Successfully!")
-    asyncio.create_task(start_cleanup_job(bot))
+    bot.loop.create_task(start_cleanup_job(bot))  # Change to bot.loop.create_task
     await idle()
     await bot.stop()
 
