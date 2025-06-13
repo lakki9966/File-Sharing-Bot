@@ -21,11 +21,13 @@ bot.add_handler(bot.on_message(filters.command(["broadcast", "users", "addadmin"
 bot.add_handler(bot.on_message(filters.text & filters.private)(access_handler.handle_shortlink))
 
 async def main():
+    logger.info("Bot ni start chesthunna...")  # Move this to top
     await bot.start()
-    print("✅ Bot Started Successfully!")
-    bot.loop.create_task(start_cleanup_job(bot))  # Change to bot.loop.create_task
+    logger.info("✅ Bot Started Successfully!")
+    bot.loop.create_task(start_cleanup_job(bot))
     await idle()
     await bot.stop()
+    logger.info("Bot stopped.")  # Add this
 
 if __name__ == "__main__":
     asyncio.run(main())
