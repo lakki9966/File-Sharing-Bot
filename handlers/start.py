@@ -3,6 +3,8 @@
 from pyrogram import Client
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from config import ADMINS
+import logging
+logger = logging.getLogger(__name__)
 
 async def start_command(bot: Client, message: Message):
     user_id = message.from_user.id
