@@ -1,6 +1,6 @@
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)  # Fix: name to __name__
 from pyrogram import Client, filters, idle
 from handlers import start, link_handler, batch_handler, access_handler, admin
 from utils.cleanup import start_cleanup_job
@@ -21,13 +21,13 @@ bot.add_handler(bot.on_message(filters.command(["broadcast", "users", "addadmin"
 bot.add_handler(bot.on_message(filters.text & filters.private)(access_handler.handle_shortlink))
 
 async def main():
-    logger.info("Bot ni start chesthunna...")  # Move this to top
+    logger.info("Bot ni start chesthunna...")
     await bot.start()
     logger.info("✅ Bot Started Successfully!")
     bot.loop.create_task(start_cleanup_job(bot))
     await idle()
     await bot.stop()
-    logger.info("Bot stopped.")  # Add this
+    logger.info("Bot stopped.")
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # Fix: name to __name__
     asyncio.run(main())
